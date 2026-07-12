@@ -32,3 +32,14 @@ dist-ssr
 *.sw?
 
 reference/*
+
+# nested standalone repo (github.com/jspark9703/esp32c5)
+esp32c5/
+
+# research model inference package (108MB, weights + validation data)
+Window3BestModelInference/
+
+# python backend
+backend/.venv/
+__pycache__/
+*.pyc
