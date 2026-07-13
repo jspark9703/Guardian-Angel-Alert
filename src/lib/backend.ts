@@ -21,6 +21,8 @@ export async function fetchPorts(): Promise<DetectedPort[]> {
 
 // ---- 실시간 스트림 (/ws/live, 10Hz) ----
 
+export type DetectState = "IDLE" | "SUSPECT" | "FALL" | "COOLDOWN";
+
 export interface LiveSample {
   t: number;
   connected: boolean; // 백엔드-수신기 시리얼 연결 여부
@@ -29,6 +31,12 @@ export interface LiveSample {
   buffered_seconds: number;
   amp_mean: number | null;
   amp_std: number | null; // 최근 0.5초 진폭 표준편차 (움직임 근사 지표)
+  // 낙상 판정 (백엔드 모델 가동 시에만 존재)
+  detect_state?: DetectState;
+  proba_fall?: number | null; // 최근 3초 윈도우 낙상 확률 (0.25초 주기 갱신)
+  threshold?: number; // 판정 임계값 (기본 0.468)
+  fall_count?: number; // 백엔드 기동 후 낙상 확정 횟수
+  last_fall_time?: number | null;
 }
 
 export interface LiveStreamState {

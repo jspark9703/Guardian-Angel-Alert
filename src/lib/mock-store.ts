@@ -505,6 +505,79 @@ export function getResetTimeLeft(deviceId: string): { stage: Device["calibration
   return { stage: d.calibrationStage, secLeft, progress: d.calibrationProgress };
 }
 
+// --- 로컬 백엔드 실판정 연동 (HOME 실장치 1대) ---
+// BackendDetectionBridge가 /ws/live 판정을 이 함수로 흘려보낸다.
+// 이 거주자는 mock tick 시뮬레이션에서 제외되며, 연결이 끊기면 mock으로
+// 위장하지 않고 오프라인(연결 끊김)으로 명시 표시한다.
+let backendDrivenResidentId: string | null = null;
+
+export function applyBackendDetection(input: {
+  connected: boolean; // 브라우저-백엔드 WS와 백엔드-수신기 시리얼 모두 연결됨
+  state?: StateMachine;
+  proba?: number | null;
+}) {
+  const u = currentUser();
+  if (!u || u.service !== "HOME") return;
+  const target = state.residents.find((r) => r.ownerUserId === u.id);
+  if (!target) return;
+  backendDrivenResidentId = target.id;
+
+  if (!input.connected) {
+    if (target.online) {
+      set((s) => ({
+        residents: s.residents.map((r) => (r.id === target.id ? { ...r, online: false } : r)),
+      }));
+      addLog("WARN", `${target.name} 실장치 연결 끊김 · 백엔드/수신기 확인 필요`, target.id);
+    }
+    return;
+  }
+
+  const nextState = input.state ?? "IDLE";
+  const confidence = input.proba ?? 0;
+  const now = Date.now();
+
+  if (target.state !== "FALL" && nextState === "FALL") {
+    const fall: FallEvent = {
+      id: `f-${now}-${target.id}`,
+      residentId: target.id,
+      residentName: target.name,
+      room: target.room,
+      timestamp: now,
+      confidence,
+      // 확정 근거인 다수결 구간 길이 (5윈도우 x 0.25초 스트라이드)
+      duration: 1.25,
+      response: "PENDING",
+    };
+    set((s) => ({
+      residents: s.residents.map((r) =>
+        r.id === target.id ? { ...r, online: true, state: "FALL", confidence } : r,
+      ),
+      falls: [fall, ...s.falls].slice(0, 200),
+      lastFallAt: now,
+      alarm: s.alarm ?? fall,
+    }));
+    addLog(
+      "FALL",
+      `${target.name} (${target.room}) 낙상 감지 · 모델 확률 ${(confidence * 100).toFixed(1)}%`,
+      target.id,
+    );
+    return;
+  }
+
+  // 상태/확률이 실제로 바뀔 때만 반영해 불필요한 리렌더를 줄인다
+  if (
+    target.state !== nextState ||
+    !target.online ||
+    Math.abs(target.confidence - confidence) > 0.001
+  ) {
+    set((s) => ({
+      residents: s.residents.map((r) =>
+        r.id === target.id ? { ...r, online: true, state: nextState, confidence } : r,
+      ),
+    }));
+  }
+}
+
 // --- Simulation loop ---
 let fallCooldown: Record<string, number> = {};
 
@@ -519,9 +592,11 @@ function tick() {
     : s.residents; // HOME uses own devices; treat all for demo
 
   // For FACILITY: only active device (선택한 호실) receives MQTT tick sim
-  const activeIds = u?.service === "FACILITY"
+  // 백엔드 실판정으로 구동되는 거주자는 mock 시뮬레이션 대상에서 제외
+  const activeIds = (u?.service === "FACILITY"
     ? [s.activeResidentId]
-    : scopedResidents.filter((r) => r.online).map((r) => r.id);
+    : scopedResidents.filter((r) => r.online).map((r) => r.id)
+  ).filter((id) => id !== backendDrivenResidentId);
 
   const updated = s.residents.map((r) => {
     if (!activeIds.includes(r.id)) return r;

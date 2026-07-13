@@ -172,8 +172,45 @@ function MonitoringPage() {
                 }
                 tone={liveMode ? "success" : "danger"}
               />
-              <StatCard label="낙상 판정" value="—" sub="모델 연동 예정 (작업 3단계)" />
-              <StatCard label="움직임 감지 임계값" value={threshold.toFixed(3)} sub="전역 설정" />
+              <StatCard
+                label="낙상 판정"
+                value={
+                  !liveMode
+                    ? "연결 끊김"
+                    : live.last?.proba_fall != null
+                      ? stateLabel(live.last.detect_state ?? "IDLE")
+                      : "모델 미가동"
+                }
+                sub={
+                  liveMode && live.last?.proba_fall != null
+                    ? `낙상 확률 ${(live.last.proba_fall * 100).toFixed(1)}% · 3초 윈도우 / 0.25초 주기`
+                    : liveMode
+                      ? "백엔드가 --no-model로 실행 중이거나 모델 로드 실패"
+                      : "백엔드/수신기 연결 후 표시됩니다"
+                }
+                tone={
+                  !liveMode || live.last?.proba_fall == null
+                    ? "default"
+                    : live.last?.detect_state === "FALL"
+                      ? "danger"
+                      : live.last?.detect_state === "SUSPECT"
+                        ? "warn"
+                        : "success"
+                }
+              />
+              <StatCard
+                label="판정 임계값"
+                value={
+                  liveMode && live.last?.threshold != null
+                    ? live.last.threshold.toFixed(3)
+                    : threshold.toFixed(3)
+                }
+                sub={
+                  liveMode && live.last?.threshold != null
+                    ? "모델 softmax 확률 기준 · 5윈도우 다수결 확정"
+                    : "전역 설정 (mock)"
+                }
+              />
             </>
           )}
         </section>

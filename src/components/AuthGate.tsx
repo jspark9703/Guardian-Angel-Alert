@@ -3,6 +3,7 @@ import { useNavigate, useRouterState } from "@tanstack/react-router";
 import { useStore, hydrateSession, useCurrentUser } from "@/lib/mock-store";
 import { AppSidebar } from "@/components/AppSidebar";
 import { FallAlarmModal } from "@/components/FallAlarmModal";
+import { BackendDetectionBridge } from "@/components/BackendDetectionBridge";
 
 const PUBLIC_PATHS = ["/login", "/signup"];
 
@@ -44,6 +45,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
       <AppSidebar />
       <main className="flex-1 overflow-y-auto">{children}</main>
       <FallAlarmModal />
+      <BackendDetectionBridge />
     </div>
   );
 }
