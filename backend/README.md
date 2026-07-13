@@ -29,13 +29,43 @@ python3 -m venv .venv
 
 체크포인트 기본 경로는 저장소 루트의 Window3BestModelInference/weights/best_model.pt 이다.
 
+## 푸시 알림 (단계 5, ntfy)
+
+FALL 확정 시 ntfy 토픽으로 휴대폰 푸시 알림을 보낸다. 팀 합의로 ntfy.sh 공개 서버를 사용한다.
+
+설정 순서:
+
+1. 팀에서 정한 토픽명을 준비한다. 토픽명을 아는 누구나 구독과 발행이 가능하므로
+   추측하기 어려운 이름을 쓴다 (예: csi-guard-fall-x7k2m9).
+2. 휴대폰에 ntfy 앱(iOS/Android)을 설치하고 해당 토픽을 구독한다.
+3. 백엔드를 토픽과 함께 실행한다.
+
+```bash
+.venv/bin/python main.py --ntfy-topic csi-guard-fall-x7k2m9
+# 또는 환경변수: NTFY_TOPIC=csi-guard-fall-x7k2m9 .venv/bin/python main.py
+# 셀프호스트 서버 사용 시: --ntfy-server https://ntfy.example.com
+```
+
+토픽을 지정하지 않으면 알림은 비활성 상태로 서버가 뜬다(/monitor/status의 notify에 표시).
+경로 점검은 서버 실행 후 다음으로 한다. 수 초 내 휴대폰 알림이 오면 정상이다.
+
+```bash
+curl -X POST http://127.0.0.1:8000/notify/test
+```
+
+동작 방식: 발송은 전용 스레드와 큐로 처리해 0.25초 탐지 루프를 막지 않으며,
+실패 시 1, 2, 4초 백오프로 최대 3회 재시도한다. FALL 확정당 1회만 발송되고
+COOLDOWN(10초) 동안 재알람이 억제된다. 구현은 notifier.py, 훅은 detector.py의
+FALL 확정 지점(on_fall 콜백)이다.
+
 ## 엔드포인트
 
 | 경로 | 내용 |
 |---|---|
-| GET /monitor/status | 시리얼 연결 상태, 수신률(Hz), 체크섬 오류, 버퍼, 낙상 판정 상태 |
+| GET /monitor/status | 시리얼 연결 상태, 수신률(Hz), 체크섬 오류, 버퍼, 낙상 판정, 알림 발송 상태 |
 | GET /monitor/window?seconds=3 | 최근 N초 윈도우 요약 (프레임 수, 진폭 통계) |
 | GET /monitor/detect | 낙상 판정 상세 + 최근 60초 확률 히스토리 |
+| POST /notify/test | ntfy 테스트 알림 발송 (알림 경로 수동 점검) |
 | WS /ws/live | 10Hz 실시간 요약 푸시 (수신률, RSSI, 진폭, 낙상 확률/상태) |
 
 ## 낙상 탐지 파이프라인 (0.25초 주기)
@@ -66,8 +96,9 @@ python3 -m venv .venv
 
 ```
 backend/
-  main.py               FastAPI 앱, 엔드포인트, 탐지 루프 기동
+  main.py               FastAPI 앱, 엔드포인트, 탐지 루프와 알림 기동
   detector.py           0.25초 주기 추론 루프, 상태머신, 인과 다수결
+  notifier.py           ntfy 푸시 알림 발송 (전용 스레드, 재시도)
   csi/protocol.py       바이너리 프레임 파서 (매직 0xA55A, 체크섬, 재동기화)
   csi/serial_reader.py  포트 탐지, 921600 연결, 자동 재연결 스레드
   csi/buffer.py         링버퍼 (30초), 타임스탬프 unwrap, 수신 품질 지표

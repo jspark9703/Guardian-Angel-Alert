@@ -1,9 +1,10 @@
-"""CSI-Guard 로컬 백엔드 (단계 1-3: 시리얼 통신 + 실시간 스트림 + 모델 추론).
+"""CSI-Guard 로컬 백엔드 (단계 1-3 + 단계 5: 시리얼 통신 + 실시간 스트림 + 모델 추론 + 푸시 알림).
 
 실행:
     python main.py                      # 포트 자동 탐지, http 127.0.0.1:8000
     python main.py --port /dev/cu.usbmodemXXXX --http-port 8000
     python main.py --no-model           # 추론 없이 수신/스트림만
+    python main.py --ntfy-topic <토픽>  # FALL 확정 시 ntfy.sh 푸시 알림 (환경변수 NTFY_TOPIC도 가능)
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import os
 import time
 
 import uvicorn
@@ -22,6 +24,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from csi.buffer import RingBuffer
 from csi.serial_reader import SerialReader
 from detector import FallDetector
+from notifier import DEFAULT_SERVER, NtfyNotifier
 
 WS_PUSH_HZ = 10
 
@@ -29,6 +32,7 @@ ring = RingBuffer(max_seconds=30.0, nominal_hz=200.0)
 reader: SerialReader | None = None
 detector: FallDetector | None = None
 detector_error: str | None = None
+notifier: NtfyNotifier | None = None
 
 app = FastAPI(title="CSI-Guard Local Backend", version="0.1.0")
 app.add_middleware(
@@ -71,8 +75,18 @@ def monitor_status() -> dict:
         "serial": reader.status() if reader else None,
         "buffer": ring.stats(),
         "detect": detector.status() if detector else {"enabled": False, "reason": detector_error},
+        "notify": notifier.status() if notifier else {"enabled": False, "reason": "ntfy 토픽 미설정"},
         "server_time": time.time(),
     }
+
+
+@app.post("/notify/test")
+def notify_test() -> dict:
+    """알림 경로 수동 점검용 테스트 발송."""
+    if notifier is None:
+        return {"ok": False, "reason": "ntfy 토픽 미설정 (--ntfy-topic 또는 NTFY_TOPIC)"}
+    notifier.notify_test()
+    return {"ok": True, "topic": notifier.topic}
 
 
 @app.get("/monitor/detect")
@@ -140,11 +154,21 @@ def start_detector(args: argparse.Namespace) -> None:
 
         engine = FallInferenceEngine(checkpoint_path=args.checkpoint, device=args.device)
         engine.warmup()
-        detector = FallDetector(ring, engine, threshold=args.threshold)
+        on_fall = notifier.notify_fall if notifier is not None else None
+        detector = FallDetector(ring, engine, threshold=args.threshold, on_fall=on_fall)
         detector.start()
     except Exception as error:
         detector_error = f"{type(error).__name__}: {error}"
         logging.getLogger("detector").exception("모델 로드 실패, 추론 비활성")
+
+
+def start_notifier(args: argparse.Namespace) -> None:
+    global notifier
+    if not args.ntfy_topic:
+        logging.getLogger("notifier").info("ntfy 토픽 미설정, 푸시 알림 비활성")
+        return
+    notifier = NtfyNotifier(topic=args.ntfy_topic, server=args.ntfy_server)
+    notifier.start()
 
 
 def main() -> None:
@@ -162,18 +186,31 @@ def main() -> None:
     ap.add_argument("--device", default="auto", choices=("auto", "cuda", "mps", "cpu"))
     ap.add_argument("--threshold", type=float, default=DEFAULT_THRESHOLD)
     ap.add_argument("--no-model", action="store_true", help="모델 추론 비활성 (수신/스트림만)")
+    ap.add_argument(
+        "--ntfy-topic",
+        default=os.environ.get("NTFY_TOPIC"),
+        help="ntfy 알림 토픽 (기본: 환경변수 NTFY_TOPIC, 미설정 시 알림 비활성)",
+    )
+    ap.add_argument(
+        "--ntfy-server",
+        default=os.environ.get("NTFY_SERVER", DEFAULT_SERVER),
+        help="ntfy 서버 주소 (기본: https://ntfy.sh, 셀프호스트 시 변경)",
+    )
     args = ap.parse_args()
 
     reader = SerialReader(
         ring, port=args.port, baud=args.baud, preferred_serial=args.preferred_serial
     )
     reader.start()
+    start_notifier(args)
     start_detector(args)
     try:
         uvicorn.run(app, host=args.http_host, port=args.http_port, log_level="info")
     finally:
         if detector is not None:
             detector.stop()
+        if notifier is not None:
+            notifier.stop()
         reader.stop()
 
 

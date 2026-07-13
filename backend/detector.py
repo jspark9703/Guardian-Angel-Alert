@@ -20,7 +20,7 @@ import logging
 import threading
 import time
 from collections import deque
-from typing import Any
+from typing import Any, Callable
 
 from csi.buffer import RingBuffer
 from features import FeatureConfig, extract_window_features
@@ -44,6 +44,7 @@ class FallDetector(threading.Thread):
         stride_sec: float = STRIDE_SEC,
         cooldown_seconds: float = COOLDOWN_SECONDS,
         feature_config: FeatureConfig | None = None,
+        on_fall: Callable[[int, float | None, float], None] | None = None,
     ) -> None:
         super().__init__(daemon=True, name="fall-detector")
         self.ring = ring
@@ -52,6 +53,8 @@ class FallDetector(threading.Thread):
         self.stride_sec = stride_sec
         self.cooldown_seconds = cooldown_seconds
         self.feature_config = feature_config or FeatureConfig()
+        # FALL 확정 시 (fall_count, proba, 시각) 콜백. 블로킹 금지 (큐 적재 수준만 허용)
+        self.on_fall = on_fall
 
         self._stop = threading.Event()
         self._lock = threading.Lock()
@@ -113,7 +116,7 @@ class FallDetector(threading.Thread):
                 if len(self._recent_preds) == MODE_SIZE
                 else 0
             )
-            self._advance_state(raw_pred, majority)
+            self._advance_state(raw_pred, majority, proba)
             self._inference_count += 1
             self._last_error = None
             self._latency_ema_ms = (
@@ -140,7 +143,7 @@ class FallDetector(threading.Thread):
         if total_ms > self.stride_sec * 1000.0:
             log.warning("tick %.0fms exceeds stride %.0fms", total_ms, self.stride_sec * 1000.0)
 
-    def _advance_state(self, raw_pred: int, majority: int) -> None:
+    def _advance_state(self, raw_pred: int, majority: int, proba: float | None = None) -> None:
         now = time.monotonic()
         if self._state == "COOLDOWN":
             if now >= self._cooldown_until:
@@ -151,6 +154,7 @@ class FallDetector(threading.Thread):
                 self._fall_count += 1
                 self._last_fall_time = time.time()
                 log.warning("FALL confirmed (#%d)", self._fall_count)
+                self._emit_fall(proba)
             self._state = "FALL"
             return
         if self._state == "FALL":
@@ -159,6 +163,15 @@ class FallDetector(threading.Thread):
             self._cooldown_until = now + self.cooldown_seconds
             return
         self._state = "SUSPECT" if raw_pred else "IDLE"
+
+    def _emit_fall(self, proba: float | None) -> None:
+        """FALL 확정 시점 콜백 호출. 콜백 오류가 탐지 루프를 깨지 않게 격리한다."""
+        if self.on_fall is None:
+            return
+        try:
+            self.on_fall(self._fall_count, proba, self._last_fall_time or time.time())
+        except Exception:
+            log.exception("on_fall 콜백 실패")
 
     def _record_skip(self, reason: str) -> None:
         with self._lock:
