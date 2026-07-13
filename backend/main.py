@@ -1,8 +1,9 @@
-"""CSI-Guard 로컬 백엔드 (단계 1, 2: 시리얼 통신 + 실시간 스트림).
+"""CSI-Guard 로컬 백엔드 (단계 1-3: 시리얼 통신 + 실시간 스트림 + 모델 추론).
 
 실행:
     python main.py                      # 포트 자동 탐지, http 127.0.0.1:8000
     python main.py --port /dev/cu.usbmodemXXXX --http-port 8000
+    python main.py --no-model           # 추론 없이 수신/스트림만
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ import argparse
 import asyncio
 import contextlib
 import json
+import logging
 import time
 
 import uvicorn
@@ -19,11 +21,14 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from csi.buffer import RingBuffer
 from csi.serial_reader import SerialReader
+from detector import FallDetector
 
 WS_PUSH_HZ = 10
 
 ring = RingBuffer(max_seconds=30.0, nominal_hz=200.0)
 reader: SerialReader | None = None
+detector: FallDetector | None = None
+detector_error: str | None = None
 
 app = FastAPI(title="CSI-Guard Local Backend", version="0.1.0")
 app.add_middleware(
@@ -65,8 +70,17 @@ def monitor_status() -> dict:
     return {
         "serial": reader.status() if reader else None,
         "buffer": ring.stats(),
+        "detect": detector.status() if detector else {"enabled": False, "reason": detector_error},
         "server_time": time.time(),
     }
+
+
+@app.get("/monitor/detect")
+def monitor_detect() -> dict:
+    """낙상 판정 상태와 최근 60초 확률 히스토리."""
+    if detector is None:
+        return {"enabled": False, "reason": detector_error}
+    return {**detector.status(), "history": detector.history()}
 
 
 @app.get("/monitor/window")
@@ -105,6 +119,8 @@ async def ws_live(ws: WebSocket) -> None:
                 "amp_mean": round(float(amps.mean()), 3) if times.size else None,
                 "amp_std": round(float(amps.std()), 3) if times.size else None,
             }
+            if detector is not None:
+                payload.update(detector.live_payload())
             await ws.send_text(json.dumps(payload))
             await asyncio.sleep(1.0 / WS_PUSH_HZ)
     except WebSocketDisconnect:
@@ -114,23 +130,50 @@ async def ws_live(ws: WebSocket) -> None:
             await ws.close()
 
 
+def start_detector(args: argparse.Namespace) -> None:
+    global detector, detector_error
+    if args.no_model:
+        detector_error = "disabled by --no-model"
+        return
+    try:
+        from inference import FallInferenceEngine
+
+        engine = FallInferenceEngine(checkpoint_path=args.checkpoint, device=args.device)
+        engine.warmup()
+        detector = FallDetector(ring, engine, threshold=args.threshold)
+        detector.start()
+    except Exception as error:
+        detector_error = f"{type(error).__name__}: {error}"
+        logging.getLogger("detector").exception("모델 로드 실패, 추론 비활성")
+
+
 def main() -> None:
     global reader
+    from inference.engine import DEFAULT_CHECKPOINT
+    from detector import DEFAULT_THRESHOLD
+
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", default=None, help="시리얼 포트 (기본: 자동 탐지)")
     ap.add_argument("--baud", type=int, default=921600)
     ap.add_argument("--preferred-serial", default=None, help="포트 여러 개일 때 우선할 시리얼 번호 조각")
     ap.add_argument("--http-host", default="127.0.0.1")
     ap.add_argument("--http-port", type=int, default=8000)
+    ap.add_argument("--checkpoint", default=str(DEFAULT_CHECKPOINT), help="모델 체크포인트 경로")
+    ap.add_argument("--device", default="auto", choices=("auto", "cuda", "mps", "cpu"))
+    ap.add_argument("--threshold", type=float, default=DEFAULT_THRESHOLD)
+    ap.add_argument("--no-model", action="store_true", help="모델 추론 비활성 (수신/스트림만)")
     args = ap.parse_args()
 
     reader = SerialReader(
         ring, port=args.port, baud=args.baud, preferred_serial=args.preferred_serial
     )
     reader.start()
+    start_detector(args)
     try:
         uvicorn.run(app, host=args.http_host, port=args.http_port, log_level="info")
     finally:
+        if detector is not None:
+            detector.stop()
         reader.stop()
 
 

@@ -39,6 +39,9 @@ esp32c5/
 # research model inference package (108MB, weights + validation data)
 Window3BestModelInference/
 
+# research feature extraction package (raw CSI -> model input preprocessing)
+ACF_Scalogram_FeatureExtraction/
+
 # python backend
 backend/.venv/
 __pycache__/
