@@ -25,6 +25,17 @@ function HomeBridge() {
       connected,
       state: sample?.detect_state,
       proba: sample?.proba_fall,
+      // 재실 감지(움직임 MV + Wander) — 낙상 DL 추론과 병렬로 계산되는 별도 신호.
+      // backend가 아직 값을 계산하지 못했으면(캘리브레이션 전 등) undefined로 와서
+      // applyBackendDetection이 이전 값을 그대로 둔다.
+      presence:
+        sample?.presence_state === "present"
+          ? "PRESENT"
+          : sample?.presence_state === "absent"
+            ? "ABSENT"
+            : undefined,
+      wander: sample?.wander_current ?? undefined,
+      mv: sample?.mv_current ?? undefined,
     });
   }, [live.wsUp, live.last]);
 

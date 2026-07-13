@@ -11,11 +11,30 @@ import {
   stopMonitor,
   setPort,
   setSerialBaud,
+  applyCalibrationStatus,
+  CALIBRATION_PHASE_SECONDS,
   type Device,
+  type CalibrationStage,
 } from "@/lib/mock-store";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { fetchPorts, type DetectedPort } from "@/lib/backend";
+import {
+  fetchPorts,
+  startCalibration,
+  useBackendUp,
+  useCalibrationStatusPoll,
+  type DetectedPort,
+} from "@/lib/backend";
+
+const STAGE_LABELS: Record<CalibrationStage, string> = {
+  IDLE: "대기",
+  LEAVING: "공간 비우는 중",
+  WAITING_ACK: "장치 응답 대기 중",
+  WAITING_AGC: "AGC 보정 중",
+  MEASURING: "움직임/재실 baseline 측정 중",
+  DONE: "완료",
+  ERROR: "오류",
+};
 
 // MQTT는 로컬 시리얼 구조 확정 전까지 비활성화 (작업명세 v1.0 참조)
 function useDetectedPorts() {
@@ -56,6 +75,15 @@ function DevicesPage() {
   const [selectedId, setSelectedId] = useState<string | null>(devices[0]?.id ?? null);
   const [resetConfirm, setResetConfirm] = useState<Device | null>(null);
   const selected = devices.find((d) => d.id === selectedId) ?? devices[0];
+
+  const backendUp = useBackendUp();
+  const residents = useStore((s) => s.residents);
+  // 실백엔드는 HOME 사용자의 대표 거주자가 매핑한 주 장치 1대에만 연결된다(현재
+  // HOME 실장치 연동 범위 — docs/작업명세_로컬_실시간_낙상감지_v1.0.md 참고).
+  const primaryDeviceId = !isFacility
+    ? residents.find((r) => r.ownerUserId === user?.id)?.deviceId
+    : undefined;
+  const isRealDevice = (d?: Device) => !isFacility && backendUp && !!d && d.id === primaryDeviceId;
 
   return (
     <div>
@@ -159,32 +187,22 @@ function DevicesPage() {
                 <Info label="Current RSSI" value={`${selected.current_rssi} dBm`} highlight />
                 <Info label="AGC" value={String(selected.agc)} />
                 <Info label="Noise Floor" value={`${selected.noise_floor} dBm`} />
+                <Info label="움직임 임계값" value={selected.presence_mv_threshold.toFixed(2)} />
+                <Info label="재실 Baseline" value={selected.wander_baseline.toFixed(2)} />
                 <Info label="MQTT Topic" value={selected.mqttTopic} wide />
               </div>
 
               {selected.calibrating ? (
-                <div className="border-2 border-primary rounded p-3 text-center">
-                  <div className="text-[10px] font-mono uppercase text-muted">
-                    {selected.calibrationStage === "WAITING"
-                      ? "공간 비우는 중"
-                      : "베이스라인 측정 중"}
-                  </div>
-                  <div className="text-2xl font-mono font-bold text-primary my-1">
-                    {Math.max(0, Math.ceil((1 - selected.calibrationProgress) * 10))}s
-                  </div>
-                  <div className="h-1 bg-background rounded overflow-hidden">
-                    <div
-                      className="h-full bg-primary transition-all"
-                      style={{ width: `${selected.calibrationProgress * 100}%` }}
-                    />
-                  </div>
-                </div>
+                <CalibratingPanel device={selected} useReal={isRealDevice(selected)} />
               ) : (
                 <button
                   onClick={() => setResetConfirm(selected)}
                   className="w-full py-2.5 bg-warning text-black rounded text-xs font-mono uppercase font-bold hover:brightness-110"
                 >
                   장치 재설정 (Recalibrate)
+                  {isRealDevice(selected) && (
+                    <span className="ml-2 text-[9px] normal-case">실장치 연동</span>
+                  )}
                 </button>
               )}
 
@@ -207,9 +225,18 @@ function DevicesPage() {
         {resetConfirm && (
           <ResetConfirmModal
             device={resetConfirm}
+            useReal={isRealDevice(resetConfirm)}
             onCancel={() => setResetConfirm(null)}
             onConfirm={() => {
-              startDeviceReset(resetConfirm.id);
+              if (isRealDevice(resetConfirm)) {
+                startCalibration().catch((e) =>
+                  toast.error(
+                    `캘리브레이션 시작 실패: ${e instanceof Error ? e.message : String(e)}`,
+                  ),
+                );
+              } else {
+                startDeviceReset(resetConfirm.id);
+              }
               setResetConfirm(null);
               toast("재설정 시작");
             }}
@@ -241,12 +268,46 @@ function Info({
   );
 }
 
+function CalibratingPanel({ device, useReal }: { device: Device; useReal: boolean }) {
+  // 실장치는 이미 진행 중인 캘리브레이션(예: 다른 화면에서 시작된)의 상태도 계속
+  // 따라가야 하므로 useReal이면 항상 폴링한다 — 시작 자체는 ResetConfirmModal의
+  // onConfirm에서 별도로 트리거한다(이 컴포넌트는 폴링+반영만 담당).
+  const status = useCalibrationStatusPoll(useReal);
+  useEffect(() => {
+    if (!useReal || !status) return;
+    applyCalibrationStatus(device, status);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [useReal, status]);
+
+  const seconds = CALIBRATION_PHASE_SECONDS[device.calibrationStage] || 0;
+  const secLeft = Math.max(0, Math.ceil((1 - device.calibrationProgress) * seconds));
+  return (
+    <div className="border-2 border-primary rounded p-3 text-center">
+      <div className="text-[10px] font-mono uppercase text-muted">
+        {STAGE_LABELS[device.calibrationStage]}
+      </div>
+      <div className="text-2xl font-mono font-bold text-primary my-1">{secLeft}s</div>
+      <div className="h-1 bg-background rounded overflow-hidden">
+        <div
+          className="h-full bg-primary transition-all"
+          style={{ width: `${device.calibrationProgress * 100}%` }}
+        />
+      </div>
+      {device.calibrationStage === "ERROR" && status?.error && (
+        <div className="mt-2 text-[10px] text-primary">{status.error}</div>
+      )}
+    </div>
+  );
+}
+
 function ResetConfirmModal({
   device,
+  useReal,
   onCancel,
   onConfirm,
 }: {
   device: Device;
+  useReal: boolean;
   onCancel: () => void;
   onConfirm: () => void;
 }) {
@@ -262,16 +323,20 @@ function ResetConfirmModal({
           <p>
             <span className="font-semibold">{device.name}</span> ({device.room}호) 장치를
             재설정합니다.
+            {useReal && (
+              <span className="ml-1 text-[10px] font-mono text-success uppercase">실장치 연동</span>
+            )}
           </p>
           <div className="border border-warning/40 bg-warning/5 rounded p-3 text-xs space-y-1">
-            <div className="font-semibold">진행 절차:</div>
+            <div className="font-semibold">진행 절차 (4단계, 총 약 31초):</div>
             <div>
               1. <b>10초간</b> 감지 공간에서 사람이 <b>완전히 벗어나</b> 있어야 합니다.
             </div>
+            <div>2. 장치가 명령에 응답할 때까지 대기 (약 0.2초).</div>
+            <div>3. 장치의 AGC 보정이 끝날 때까지 대기 (약 1초).</div>
             <div>
-              2. 이어서 <b>10초간</b> baseline RSSI/noise floor를 재수집합니다.
+              4. 이어서 <b>20초간</b> 움직임 임계값/재실 baseline을 재수집합니다.
             </div>
-            <div className="text-muted mt-1">총 소요 시간: 약 20초</div>
           </div>
         </div>
         <div className="p-4 border-t border-border flex justify-end gap-2">
@@ -353,15 +418,19 @@ function AddDeviceButton({
       calibrating: false,
       calibrationStage: "IDLE",
       calibrationProgress: 0,
+      presence_mv_threshold: 1.8,
+      wander_baseline: 0.5,
       connection: connectionType,
       serialPort: connectionType === "SERIAL" ? serialPortInput : undefined,
       facilityId,
       ownerUserId: ownerId,
     };
     upsertDevice(dev);
-    // 장치 추가 시 자동으로 캘리브레이션 시작: 10초 대기 + 10초 최적화
+    // 장치 추가 시 자동으로 캘리브레이션 시작 (4단계, 총 약 31초)
     startDeviceReset(id);
-    toast.success(`${name} 추가됨 · 캘리브레이션 시작 (10초 대기 → 10초 측정)`);
+    toast.success(
+      `${name} 추가됨 · 캘리브레이션 시작 (공간 비우기 → 응답 대기 → AGC 보정 → baseline 측정)`,
+    );
     setOpen(false);
     setName("");
     setRoom(isFacility ? "" : "거실");
@@ -389,7 +458,8 @@ function AddDeviceButton({
               </span>
             </h3>
             <p className="text-[11px] text-muted">
-              추가 즉시 <b>10초 대기 → 10초 캘리브레이션</b>이 진행됩니다.
+              추가 즉시 <b>4단계 캘리브레이션</b>(공간 비우기 → 응답 대기 → AGC 보정 → baseline
+              측정, 총 약 31초)이 진행됩니다.
             </p>
             <div>
               <label className="text-[10px] font-mono uppercase text-muted">장치 이름</label>

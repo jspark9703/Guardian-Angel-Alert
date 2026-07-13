@@ -128,7 +128,9 @@ function MonitoringPage() {
           </section>
         )}
 
-        <section className="grid grid-cols-3 gap-4">
+        <section
+          className={`grid gap-4 ${isFacility ? "grid-cols-3" : "grid-cols-2 lg:grid-cols-4"}`}
+        >
           {isFacility ? (
             <>
               <StatCard
@@ -209,6 +211,30 @@ function MonitoringPage() {
                   liveMode && live.last?.threshold != null
                     ? "모델 softmax 확률 기준 · 5윈도우 다수결 확정"
                     : "전역 설정 (mock)"
+                }
+              />
+              <StatCard
+                label="움직임 감지 (재실용)"
+                value={
+                  !liveMode
+                    ? "연결 끊김"
+                    : live.last?.mv_current != null
+                      ? live.last.mv_current.toFixed(2)
+                      : "캘리브레이션 필요"
+                }
+                sub={
+                  liveMode && live.last?.presence_mv_threshold != null
+                    ? `임계값 ${live.last.presence_mv_threshold.toFixed(2)} · 낙상 DL 모델과 병렬 계산되는 별도 신호`
+                    : liveMode
+                      ? "장치 설정에서 캘리브레이션을 진행하세요"
+                      : "백엔드/수신기 연결 후 표시됩니다"
+                }
+                tone={
+                  !liveMode || live.last?.mv_current == null
+                    ? "default"
+                    : live.last.mv_current >= (live.last.presence_mv_threshold ?? Infinity)
+                      ? "warn"
+                      : "success"
                 }
               />
             </>

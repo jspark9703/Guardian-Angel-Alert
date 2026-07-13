@@ -16,15 +16,18 @@ import json
 import logging
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import uvicorn
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from csi.buffer import RingBuffer
 from csi.serial_reader import SerialReader
 from detector import FallDetector
 from notifier import DEFAULT_SERVER, NtfyNotifier
+from onboarding import CalibrationState, run_calibration
+from presence import PresenceConfig
 
 WS_PUSH_HZ = 10
 
@@ -33,6 +36,13 @@ reader: SerialReader | None = None
 detector: FallDetector | None = None
 detector_error: str | None = None
 notifier: NtfyNotifier | None = None
+
+# 재실(움직임/Wander) 감지 설정과 온보딩 캘리브레이션 상태 — 낙상 DL 모델과 무관한
+# 별도 인메모리 상태(백엔드 재시작 시 초기화, 기존 PipelineConfig류와 동일한 설계).
+presence_config = PresenceConfig()
+calibration_state = CalibrationState()
+calibration_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="calibration")
+calibration_task: asyncio.Task | None = None
 
 app = FastAPI(title="CSI-Guard Local Backend", version="0.1.0")
 app.add_middleware(
@@ -87,6 +97,39 @@ def notify_test() -> dict:
         return {"ok": False, "reason": "ntfy 토픽 미설정 (--ntfy-topic 또는 NTFY_TOPIC)"}
     notifier.notify_test()
     return {"ok": True, "topic": notifier.topic}
+
+
+@app.post("/onboarding/calibrate/start")
+async def onboarding_calibrate_start() -> dict:
+    """온보딩 3단계: 캘리브레이션을 백그라운드로 시작 (leaving/waiting_ack/waiting_agc/
+    measuring 4단계, 총 약 31초 — 실제 소요시간 그대로, 압축하지 않음)."""
+    global calibration_task
+    if reader is None or not reader.running:
+        raise HTTPException(status_code=400, detail="device not connected")
+    if calibration_state.phase not in ("idle", "done", "error"):
+        raise HTTPException(status_code=400, detail="calibration already in progress")
+    calibration_task = asyncio.create_task(
+        run_calibration(reader, presence_config, calibration_state, calibration_executor)
+    )
+    return {"status": "started"}
+
+
+@app.get("/onboarding/calibrate/status")
+def onboarding_calibrate_status() -> dict:
+    """캘리브레이션 진행상황 폴링 (권장: 1초 간격)."""
+    calib = calibration_state
+    now = time.time()
+    elapsed_s = (now - calib.started_at) if calib.started_at is not None else None
+    phase_elapsed_s = (now - calib.phase_started_at) if calib.phase_started_at is not None else None
+    return {
+        "phase": calib.phase,
+        "elapsed_s": round(elapsed_s, 2) if elapsed_s is not None else None,
+        "phase_elapsed_s": round(phase_elapsed_s, 2) if phase_elapsed_s is not None else None,
+        "agc_duration_s": round(calib.agc_duration_s, 2) if calib.agc_duration_s is not None else None,
+        "presence_mv_threshold": calib.presence_mv_threshold,
+        "wander_baseline": calib.wander_baseline,
+        "error": calib.error,
+    }
 
 
 @app.get("/monitor/detect")
@@ -155,7 +198,13 @@ def start_detector(args: argparse.Namespace) -> None:
         engine = FallInferenceEngine(checkpoint_path=args.checkpoint, device=args.device)
         engine.warmup()
         on_fall = notifier.notify_fall if notifier is not None else None
-        detector = FallDetector(ring, engine, threshold=args.threshold, on_fall=on_fall)
+        detector = FallDetector(
+            ring,
+            engine,
+            threshold=args.threshold,
+            presence_config=presence_config,
+            on_fall=on_fall,
+        )
         detector.start()
     except Exception as error:
         detector_error = f"{type(error).__name__}: {error}"
@@ -212,6 +261,7 @@ def main() -> None:
         if notifier is not None:
             notifier.stop()
         reader.stop()
+        calibration_executor.shutdown(wait=False)
 
 
 if __name__ == "__main__":

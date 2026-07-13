@@ -84,3 +84,13 @@ class RingBuffer:
             n_sc = min(f.amps.shape[0] for f in list(self._frames)[start:])
             amps = np.stack([f.amps[:n_sc] for f in list(self._frames)[start:]])
             return times, amps
+
+    def get_window(self, seconds: float) -> tuple[np.ndarray, np.ndarray] | None:
+        """`window()`의 별칭 — 온보딩 캘리브레이션(onboarding.run_calibration)의
+        monitor 덕타이핑 계약(migration.md §5)이 기대하는 이름. 데이터가 없으면
+        `window()`처럼 빈 배열 대신 None을 반환해 호출부가 "윈도우 없음"과
+        "빈 윈도우"를 구분하지 않고 바로 None 체크만 하면 되게 한다."""
+        times, amps = self.window(seconds)
+        if times.size == 0:
+            return None
+        return times, amps

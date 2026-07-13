@@ -66,7 +66,34 @@ FALL 확정 지점(on_fall 콜백)이다.
 | GET /monitor/window?seconds=3 | 최근 N초 윈도우 요약 (프레임 수, 진폭 통계) |
 | GET /monitor/detect | 낙상 판정 상세 + 최근 60초 확률 히스토리 |
 | POST /notify/test | ntfy 테스트 알림 발송 (알림 경로 수동 점검) |
-| WS /ws/live | 10Hz 실시간 요약 푸시 (수신률, RSSI, 진폭, 낙상 확률/상태) |
+| POST /onboarding/calibrate/start | 온보딩 3단계: 움직임/재실 캘리브레이션 시작 (leaving→waiting_ack→waiting_agc→measuring, 총 약 31초) |
+| GET /onboarding/calibrate/status | 캘리브레이션 진행상황 폴링 (phase, phase_elapsed_s, agc_duration_s, presence_mv_threshold, wander_baseline) |
+| WS /ws/live | 10Hz 실시간 요약 푸시 (수신률, RSSI, 진폭, 낙상 확률/상태, 재실 상태) |
+
+## 움직임(MV) · 재실(Presence) 감지 (온보딩 캘리브레이션)
+
+낙상 DL 추론과 **완전히 독립적으로**, 같은 CSI 스트림에서 병렬로 도는 별도 신호
+파이프라인이다(`presence/`, `onboarding.py`). reference/fall_detect(구 이동분산
+임계값 기반 백엔드)에서 이식했다 — 자세한 배경은
+`../reference/fall_detect/migration.md`, `../reference/fall_detect/occupation_pipline.md` 참고.
+
+```
+매 0.25초 틱 (detector.py, DL 추론과 같은 스레드에서 순차 실행되지만 계산은 별개):
+  MV 신호   : ring.get_window(3s)  -> compute_final_signal(...) -> mv_current
+  Wander 신호: ring.get_window(6s) -> compute_final_signal(..., compute_band_energy=True) -> wander_current
+  PresenceDetector.update(mv_current, wander_current) -> presence_state(PRESENT/ABSENT)
+```
+
+- `presence_mv_threshold`(이동분산 임계값)와 `wander_baseline`(조용한 방의 Welch PSD
+  에너지 기준값)은 `POST /onboarding/calibrate/start`가 구동하는 캘리브레이션으로
+  도출된다 — 낙상 판정에 쓰이는 DL 확률 임계값(`--threshold`, 기본 0.468)과는 이름도
+  척도도 다른 완전히 별개의 값이다.
+- 캘리브레이션은 `leave_wait_s`(10s, 설치자 퇴실 대기) → `"train"` 명령 전송 →
+  `waiting_ack`(~0.2s, 스트림 무음 확인) → `waiting_agc`(~1s, 펌웨어 AGC 보정) →
+  `measuring`(20s, baseline 캡처) 순으로 진행되며 총 약 31초 걸린다 — 압축하지 않고
+  실제 소요시간 그대로 노출한다.
+- `"train"` 명령은 `csi_recv_calibrate` 펌웨어가 이미 구현하고 있다고 가정한다
+  (별도 구현/수정 없음 — `SerialReader.send_line()`은 명령을 그대로 전달할 뿐).
 
 ## 낙상 탐지 파이프라인 (0.25초 주기)
 
@@ -96,18 +123,23 @@ FALL 확정 지점(on_fall 콜백)이다.
 
 ```
 backend/
-  main.py               FastAPI 앱, 엔드포인트, 탐지 루프와 알림 기동
-  detector.py           0.25초 주기 추론 루프, 상태머신, 인과 다수결
-  notifier.py           ntfy 푸시 알림 발송 (전용 스레드, 재시도)
-  csi/protocol.py       바이너리 프레임 파서 (매직 0xA55A, 체크섬, 재동기화)
-  csi/serial_reader.py  포트 탐지, 921600 연결, 자동 재연결 스레드
-  csi/buffer.py         링버퍼 (30초), 타임스탬프 unwrap, 수신 품질 지표
-  features/common.py    S3 scalogram 코어 (원본 amfall_losnlos_common.py 이식)
-  features/acf.py       PCA-ACF 계산 (원본 build_losnlos_pca_motion_acf_dataset.py 이식)
-  features/realtime.py  실시간 윈도우 -> 모델 입력 피처 래퍼
-  inference/model.py    DualBranchResNet 정의 (체크포인트와 1:1, 구조 변경 금지)
-  inference/engine.py   체크포인트 로드, 정규화, 단일 윈도우 추론
-  bench_pipeline.py     파이프라인 지연 벤치마크
+  main.py                FastAPI 앱, 엔드포인트, 탐지 루프와 알림 기동
+  detector.py            0.25초 주기 추론 루프, 상태머신, 인과 다수결, 재실 감지 병렬 계산
+  notifier.py            ntfy 푸시 알림 발송 (전용 스레드, 재시도)
+  onboarding.py          온보딩 3단계 캘리브레이션 오케스트레이션 (움직임/재실 baseline 도출)
+  csi/protocol.py        바이너리 프레임 파서 (매직 0xA55A, 체크섬, 재동기화)
+  csi/serial_reader.py   포트 탐지, 921600 연결, 자동 재연결 스레드, train 명령 전송
+  csi/buffer.py          링버퍼 (30초), 타임스탬프 unwrap, 수신 품질 지표
+  features/common.py     S3 scalogram 코어 (원본 amfall_losnlos_common.py 이식)
+  features/acf.py        PCA-ACF 계산 (원본 build_losnlos_pca_motion_acf_dataset.py 이식)
+  features/realtime.py   실시간 윈도우 -> 모델 입력 피처 래퍼
+  inference/model.py     DualBranchResNet 정의 (체크포인트와 1:1, 구조 변경 금지)
+  inference/engine.py    체크포인트 로드, 정규화, 단일 윈도우 추론
+  presence/config.py     재실 감지 파라미터 (PresenceConfig, presence_mv_threshold/wander_*)
+  presence/streaming_features.py  MV/Wander 신호체인 (reference/fall_detect 이식)
+  presence/preprocessing.py       리샘플/대역통과/이동분산 저수준 함수 (동일 이식)
+  presence/state_machine.py       PresenceDetector 상태머신 (PRESENT/ABSENT)
+  bench_pipeline.py      파이프라인 지연 벤치마크
 ```
 
 프레임 프로토콜 정의의 원본은 esp32c5/csi_recv/main/app_main.c 이다.
