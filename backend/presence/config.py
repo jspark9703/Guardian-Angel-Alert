@@ -30,7 +30,7 @@ class PresenceConfig:
     # Wander(저주파 잔향) 신호체인 — 사전 필터(prefilter)는 넓게, Welch 측정 대역(bandpass)은
     # 좁게 잡아야 한다. 같게 만들면 사전 필터가 이미 전체 에너지를 그 대역에 가둬버려
     # 정규화 후 측정값의 구분력이 사라진다(occupation_pipline.md §2 실측 근거).
-    wander_window_sec: float = 6.0
+    wander_window_sec: float = 10.0
     wander_mv_window_sec: float = 1.0
     wander_prefilter_low: float = 0.05
     wander_prefilter_high: float = 5.0
@@ -40,7 +40,7 @@ class PresenceConfig:
     wander_ratio_threshold: float = 1.8
     wander_min_duration_s: float = 2.0
 
-    presence_timeout_s: float = 6.0
+    presence_timeout_s: float = 10.0
 
     @property
     def omega(self) -> int:

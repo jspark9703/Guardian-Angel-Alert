@@ -60,7 +60,11 @@ function Stat({ label, value, highlight }: { label: string; value: string; highl
   return (
     <div className="bg-background border border-border rounded p-3">
       <div className="text-[10px] font-mono text-muted uppercase mb-1">{label}</div>
-      <div className={`text-sm font-mono ${highlight ? "text-primary font-bold" : "text-foreground"}`}>{value}</div>
+      <div
+        className={`text-sm font-mono ${highlight ? "text-primary font-bold" : "text-foreground"}`}
+      >
+        {value}
+      </div>
     </div>
   );
 }

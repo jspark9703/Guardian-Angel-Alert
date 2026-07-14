@@ -25,7 +25,9 @@ export interface MonitorStartPayload {
   preferred_serial?: string;
 }
 
-export async function startMonitor(payload: MonitorStartPayload = {}): Promise<{ status: string; port: string | null; connected: boolean }> {
+export async function startMonitor(
+  payload: MonitorStartPayload = {},
+): Promise<{ status: string; port: string | null; connected: boolean }> {
   const res = await fetch(`${BACKEND_URL}/monitor/start`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -104,7 +106,7 @@ export interface LiveSample {
 
 // ---- 온보딩 캘리브레이션 (/onboarding/calibrate/*) ----
 // 4단계: leaving(공간 비우기) -> waiting_ack(장치 응답 대기) -> waiting_agc(AGC 보정)
-// -> measuring(baseline 측정), 총 약 31초. 압축하지 않은 실제 소요시간이다.
+// -> measuring(baseline 측정), 총 약 61초. 압축하지 않은 실제 소요시간이다.
 export type CalibrationPhase =
   | "idle"
   | "leaving"
@@ -124,7 +126,9 @@ export interface CalibrationStatus {
   error: string | null;
 }
 
-export async function startCalibration(payload: MonitorStartPayload = {}): Promise<{ status: string }> {
+export async function startCalibration(
+  payload: MonitorStartPayload = {},
+): Promise<{ status: string }> {
   const res = await fetch(`${BACKEND_URL}/onboarding/calibrate/start`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -182,14 +186,19 @@ export interface BackendCalibrationState {
 // active=true가 되는 순간 캘리브레이션을 1회 시작하고 useCalibrationStatusPoll로 상태를
 // 계속 폴링한다. mock startDeviceReset()과 나란히 쓰이는 실백엔드 경로 — 온보딩
 // 위저드처럼 "이 화면에 들어오면 곧바로 캘리브레이션을 시작"하는 1회성 흐름에 쓴다.
-export function useBackendCalibration(active: boolean, payload?: MonitorStartPayload): BackendCalibrationState {
+export function useBackendCalibration(
+  active: boolean,
+  payload?: MonitorStartPayload,
+): BackendCalibrationState {
   const [startError, setStartError] = useState<string | null>(null);
   const startedRef = useRef(false);
 
   useEffect(() => {
     if (!active || startedRef.current) return;
     startedRef.current = true;
-    startCalibration(payload).catch((e) => setStartError(e instanceof Error ? e.message : String(e)));
+    startCalibration(payload).catch((e) =>
+      setStartError(e instanceof Error ? e.message : String(e)),
+    );
   }, [active, payload]);
 
   const status = useCalibrationStatusPoll(active);
@@ -468,13 +477,20 @@ export async function updateDetectionConfig(
 // ---- 알림(Ntfy) 다중 수신자 관리 ----
 
 export async function fetchNtfyRecipients(): Promise<NtfyRecipient[]> {
-  const res = await fetch(`${BACKEND_URL}/notify/recipients`, { signal: AbortSignal.timeout(2000) });
+  const res = await fetch(`${BACKEND_URL}/notify/recipients`, {
+    signal: AbortSignal.timeout(2000),
+  });
   if (!res.ok) throw new Error(`notify/recipients ${res.status}`);
   const data = await res.json();
   return data.recipients;
 }
 
-export async function addNtfyRecipient(payload: { name?: string; topic: string; server?: string; notify_fall_enabled?: boolean }): Promise<NtfyRecipient> {
+export async function addNtfyRecipient(payload: {
+  name?: string;
+  topic: string;
+  server?: string;
+  notify_fall_enabled?: boolean;
+}): Promise<NtfyRecipient> {
   const res = await fetch(`${BACKEND_URL}/notify/recipients`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -488,7 +504,10 @@ export async function addNtfyRecipient(payload: { name?: string; topic: string; 
   return res.json();
 }
 
-export async function updateNtfyRecipient(id: string, payload: { notify_fall_enabled?: boolean }): Promise<NtfyRecipient> {
+export async function updateNtfyRecipient(
+  id: string,
+  payload: { notify_fall_enabled?: boolean },
+): Promise<NtfyRecipient> {
   const res = await fetch(`${BACKEND_URL}/notify/recipients/${id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
@@ -496,7 +515,9 @@ export async function updateNtfyRecipient(id: string, payload: { notify_fall_ena
     signal: AbortSignal.timeout(5000),
   });
   if (!res.ok) {
-    const body = await res.json().catch(() => ({ detail: `notify/recipients/${id} ${res.status}` }));
+    const body = await res
+      .json()
+      .catch(() => ({ detail: `notify/recipients/${id} ${res.status}` }));
     throw new Error(body.detail ?? `notify/recipients/${id} ${res.status}`);
   }
   return res.json();

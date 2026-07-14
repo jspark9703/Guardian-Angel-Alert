@@ -148,8 +148,10 @@ function ResidentsPage() {
                       </button>
                       <button
                         onClick={() => {
-                          deleteResident(r.id);
-                          toast(`${r.name} 삭제됨`);
+                          if (confirm(`${r.name} 삭제?`)) {
+                            deleteResident(r.id);
+                            toast(`${r.name} 삭제됨`);
+                          }
                         }}
                         className="text-[10px] font-mono uppercase text-primary hover:brightness-110"
                       >

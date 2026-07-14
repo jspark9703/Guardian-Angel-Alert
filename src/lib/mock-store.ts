@@ -83,14 +83,14 @@ export type CalibrationStage =
 
 // 각 단계의 실제 소요시간(초) — mock 타이머와 실백엔드 폴링 화면이 함께 참조하는 기준.
 // backend/onboarding.py run_calibration()의 기본 파라미터와 동일(leave_wait_s/
-// silence_confirm_s 근사/AGC 창 근사/baseline_window_s). 총합 약 31.2초로, 압축하지
-// 않은 실제 소요시간을 그대로 노출한다(기능명세서의 "10초+10초" 표기는 갱신 대상).
+// silence_confirm_s 근사/AGC 창 근사/baseline_window_s). 총합 약 61.2초로, 압축하지
+// 않은 실제 소요시간을 그대로 노출한다.
 export const CALIBRATION_PHASE_SECONDS: Record<CalibrationStage, number> = {
   IDLE: 0,
-  LEAVING: 10,
+  LEAVING: 30,
   WAITING_ACK: 0.2,
   WAITING_AGC: 1,
-  MEASURING: 20,
+  MEASURING: 30,
   DONE: 0,
   ERROR: 0,
 };
@@ -804,7 +804,7 @@ export function regenerateInviteCode(facilityId: string) {
 }
 
 // Device 캘리브레이션 — 실제 온보딩 캘리브레이션(backend/onboarding.py)과 동일한
-// 4단계 타이밍을 mock도 그대로 재현한다(§CALIBRATION_PHASE_SECONDS, 총 약 31.2초).
+// 4단계 타이밍을 mock도 그대로 재현한다(§CALIBRATION_PHASE_SECONDS, 총 약 61.2초).
 // mock/실장치 구분 없이 같은 phase 모델을 쓴다 — 실장치는 useBackendCalibration()이
 // 폴링으로 이 Device 필드들을 채우고, mock/미연결 장치는 이 타이머가 채운다.
 export const CALIBRATION_STAGE_ORDER: CalibrationStage[] = [

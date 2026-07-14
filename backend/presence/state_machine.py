@@ -81,6 +81,7 @@ class PresenceDetector:
         self.state = PresenceState.ABSENT  # boot default: no activity observed yet
         self.last_activity_at: float | None = None
         self._wander_confirm_start_s: float | None = None
+        self._mv_history: list[float] = []
 
     def update(self, now_s: float, mv_value: float, wander_value: float) -> PresenceStatus:
         """
@@ -94,6 +95,17 @@ class PresenceDetector:
         Returns:
             PresenceStatus reflecting the new state.
         """
+        self._mv_history.append(mv_value)
+        if len(self._mv_history) > 3:
+            self._mv_history.pop(0)
+
+        if len(self._mv_history) == 3:
+            smoothed_mv = 0.4 * self._mv_history[2] + 0.3 * self._mv_history[1] + 0.3 * self._mv_history[0]
+        elif len(self._mv_history) == 2:
+            smoothed_mv = 0.6 * self._mv_history[1] + 0.4 * self._mv_history[0]
+        else:
+            smoothed_mv = self._mv_history[0]
+
         wander_ratio = wander_value / self.wander_baseline if self.wander_baseline > 1e-8 else 0.0
         raw_wander_active = wander_ratio >= self.wander_ratio_threshold
 
@@ -105,7 +117,9 @@ class PresenceDetector:
             self._wander_confirm_start_s = None
             wander_confirmed = False
 
-        if mv_value >= self.mv_threshold or wander_confirmed:
+        if smoothed_mv >= self.mv_threshold:
+            self.last_activity_at = now_s
+        elif self.state == PresenceState.PRESENT and wander_confirmed:
             self.last_activity_at = now_s
 
         prev_state = self.state
@@ -121,7 +135,7 @@ class PresenceDetector:
 
         return PresenceStatus(
             state=self.state,
-            mv_current=mv_value,
+            mv_current=smoothed_mv,
             wander_current=wander_value,
             mv_threshold=self.mv_threshold,
             wander_baseline=self.wander_baseline,

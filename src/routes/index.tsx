@@ -77,7 +77,8 @@ function MonitoringPage() {
     homeDevices.find((d) => d.id === primaryDeviceId) ??
     homeDevices[0];
   const selectedResident = residents.find(
-    (r) => r.deviceId === selectedDevice?.id || (r.deviceIds ?? []).includes(selectedDevice?.id ?? ""),
+    (r) =>
+      r.deviceId === selectedDevice?.id || (r.deviceIds ?? []).includes(selectedDevice?.id ?? ""),
   );
   const showDevicePicker = !isFacility && homeDevices.length > 1;
   const showRealData =
@@ -200,7 +201,7 @@ function MonitoringPage() {
               <StatCard
                 label="재실감지"
                 value={presenceLabel(active?.presence ?? "ABSENT")}
-                sub={`MV ${(active?.mv ?? 0).toFixed(2)} / 임계값 ${threshold.toFixed(2)}`}
+                sub={`MV ${(active?.mv ?? 0).toFixed(2)}/${threshold.toFixed(2)} · WANDER ${(active?.wander ?? 0).toFixed(2)}/${config.wander_threshold.toFixed(2)}`}
                 tone={active?.presence === "PRESENT" ? "success" : "default"}
               />
               <StatCard
@@ -236,13 +237,15 @@ function MonitoringPage() {
                 }
                 sub={
                   effectiveLiveMode && live.last?.mv_current != null
-                    ? `MV ${live.last.mv_current.toFixed(2)} / 임계값 ${(live.last.presence_mv_threshold ?? liveMvThreshold).toFixed(2)}`
+                    ? `MV ${live.last.mv_current.toFixed(2)}/${(live.last.presence_mv_threshold ?? liveMvThreshold).toFixed(2)} · WANDER ${(live.last.wander_ratio ?? 0).toFixed(2)}/${(live.last.wander_ratio_threshold ?? 0).toFixed(2)}`
                     : effectiveLiveMode
                       ? "장치 설정에서 캘리브레이션을 진행하세요"
                       : "백엔드/수신기 연결 후 표시됩니다"
                 }
                 tone={
-                  effectiveLiveMode && live.last?.presence_state === "present" ? "success" : "default"
+                  effectiveLiveMode && live.last?.presence_state === "present"
+                    ? "success"
+                    : "default"
                 }
               />
               <StatCard

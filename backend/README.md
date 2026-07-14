@@ -66,7 +66,7 @@ FALL 확정 지점(on_fall 콜백)이다.
 | GET /monitor/window?seconds=3 | 최근 N초 윈도우 요약 (프레임 수, 진폭 통계) |
 | GET /monitor/detect | 낙상 판정 상세 + 최근 60초 확률 히스토리 |
 | POST /notify/test | ntfy 테스트 알림 발송 (알림 경로 수동 점검) |
-| POST /onboarding/calibrate/start | 온보딩 3단계: 움직임/재실 캘리브레이션 시작 (leaving→waiting_ack→waiting_agc→measuring, 총 약 31초) |
+| POST /onboarding/calibrate/start | 온보딩 3단계: 움직임/재실 캘리브레이션 시작 (leaving→waiting_ack→waiting_agc→measuring, 총 약 61초) |
 | GET /onboarding/calibrate/status | 캘리브레이션 진행상황 폴링 (phase, phase_elapsed_s, agc_duration_s, presence_mv_threshold, wander_baseline) |
 | WS /ws/live | 10Hz 실시간 요약 푸시 (수신률, RSSI, 진폭, 낙상 확률/상태, 재실 상태) |
 
@@ -99,9 +99,9 @@ FALL 확정 지점(on_fall 콜백)이다.
   에너지 기준값)은 `POST /onboarding/calibrate/start`가 구동하는 캘리브레이션으로
   도출된다 — 낙상 판정에 쓰이는 DL 확률 임계값(`--threshold`, 기본 0.468)과는 이름도
   척도도 다른 완전히 별개의 값이다.
-- 캘리브레이션은 `leave_wait_s`(10s, 설치자 퇴실 대기) → `"train"` 명령 전송 →
+- 캘리브레이션은 `leave_wait_s`(30s, 설치자 퇴실 대기) → `"train"` 명령 전송 →
   `waiting_ack`(~0.2s, 스트림 무음 확인) → `waiting_agc`(~1s, 펌웨어 AGC 보정) →
-  `measuring`(20s, baseline 캡처) 순으로 진행되며 총 약 31초 걸린다 — 압축하지 않고
+  `measuring`(30s, baseline 캡처) 순으로 진행되며 총 약 61초 걸린다 — 압축하지 않고
   실제 소요시간 그대로 노출한다.
 - `"train"` 명령은 `csi_recv_calibrate` 펌웨어가 이미 구현하고 있다고 가정한다
   (별도 구현/수정 없음 — `SerialReader.send_line()`은 명령을 그대로 전달할 뿐).

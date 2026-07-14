@@ -327,14 +327,14 @@ function ResetConfirmModal({
             )}
           </p>
           <div className="border border-warning/40 bg-warning/5 rounded p-3 text-xs space-y-1">
-            <div className="font-semibold">진행 절차 (4단계, 총 약 31초):</div>
+            <div className="font-semibold">진행 절차 (4단계, 총 약 61초):</div>
             <div>
-              1. <b>10초간</b> 감지 공간에서 사람이 <b>완전히 벗어나</b> 있어야 합니다.
+              1. <b>30초간</b> 감지 공간에서 사람이 <b>완전히 벗어나</b> 있어야 합니다.
             </div>
             <div>2. 장치가 명령에 응답할 때까지 대기 (약 0.2초).</div>
             <div>3. 장치의 AGC 보정이 끝날 때까지 대기 (약 1초).</div>
             <div>
-              4. 이어서 <b>20초간</b> 움직임 임계값/재실 baseline을 재수집합니다.
+              4. 이어서 <b>30초간</b> 움직임 임계값/재실 baseline을 재수집합니다.
             </div>
           </div>
         </div>
@@ -429,7 +429,7 @@ function AddDeviceButton({
       ownerUserId: ownerId,
     };
     upsertDevice(dev);
-    // 장치 추가 시 자동으로 캘리브레이션 시작 (4단계, 총 약 31초) — HOME +
+    // 장치 추가 시 자동으로 캘리브레이션 시작 (4단계, 총 약 61초) — HOME +
     // 실백엔드 연결 시엔 실캘리브레이션 API를, 그 외엔 mock 타이머를 사용한다.
     if (useReal) {
       startCalibration({ port: serialPortInput || undefined, baud: 921600 }).catch((e) =>
@@ -469,7 +469,7 @@ function AddDeviceButton({
             </h3>
             <p className="text-[11px] text-muted">
               추가 즉시 <b>4단계 캘리브레이션</b>(공간 비우기 → 응답 대기 → AGC 보정 → baseline
-              측정, 총 약 31초)이 진행됩니다.
+              측정, 총 약 61초)이 진행됩니다.
             </p>
             <div>
               <label className="text-[10px] font-mono uppercase text-muted">장치 이름</label>

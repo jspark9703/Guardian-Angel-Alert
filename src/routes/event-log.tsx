@@ -16,7 +16,8 @@ function EventLogPage() {
   const filtered = useMemo(() => {
     return logs.filter((l) => {
       const matchLevel = filter === "ALL" || l.level === filter;
-      const matchQuery = query.trim() === "" || l.msg.toLowerCase().includes(query.trim().toLowerCase());
+      const matchQuery =
+        query.trim() === "" || l.msg.toLowerCase().includes(query.trim().toLowerCase());
       return matchLevel && matchQuery;
     });
   }, [logs, filter, query]);
@@ -28,7 +29,9 @@ function EventLogPage() {
         <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight mb-1">Event Log</h1>
-            <p className="text-sm text-muted">총 {logs.length}건 · 서비스 권한 범위 내 이벤트만 표시됩니다.</p>
+            <p className="text-sm text-muted">
+              총 {logs.length}건 · 서비스 권한 범위 내 이벤트만 표시됩니다.
+            </p>
           </div>
           <div className="flex gap-2">
             <input
@@ -65,14 +68,18 @@ function EventLogPage() {
                 <tr key={i}>
                   <td className="p-3 text-muted">{fmtDateTime(l.ts)}</td>
                   <td className="p-3">
-                    <span className={`text-[10px] font-bold uppercase ${levelColor(l.level)}`}>{l.level}</span>
+                    <span className={`text-[10px] font-bold uppercase ${levelColor(l.level)}`}>
+                      {l.level}
+                    </span>
                   </td>
                   <td className="p-3 text-foreground/80">{l.msg}</td>
                 </tr>
               ))}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={3} className="p-8 text-center text-muted text-xs">조건에 맞는 이벤트 로그가 없습니다.</td>
+                  <td colSpan={3} className="p-8 text-center text-muted text-xs">
+                    조건에 맞는 이벤트 로그가 없습니다.
+                  </td>
                 </tr>
               )}
             </tbody>
@@ -85,10 +92,15 @@ function EventLogPage() {
 
 function levelColor(level: string) {
   switch (level) {
-    case "FALL": return "text-primary";
-    case "ERROR": return "text-primary";
-    case "WARN": return "text-warning";
-    case "INFO": return "text-success";
-    default: return "text-muted";
+    case "FALL":
+      return "text-primary";
+    case "ERROR":
+      return "text-primary";
+    case "WARN":
+      return "text-warning";
+    case "INFO":
+      return "text-success";
+    default:
+      return "text-muted";
   }
 }

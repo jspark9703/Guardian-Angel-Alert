@@ -206,7 +206,7 @@ def monitor_stop() -> dict:
 @app.post("/onboarding/calibrate/start")
 async def onboarding_calibrate_start(payload: dict = Body({})) -> dict:
     """온보딩 3단계: 캘리브레이션을 백그라운드로 시작 (leaving/waiting_ack/waiting_agc/
-    measuring 4단계, 총 약 31초 — 실제 소요시간 그대로, 압축하지 않음)."""
+    measuring 4단계, 총 약 61초 — 실제 소요시간 그대로, 압축하지 않음)."""
     global calibration_task
     port = payload.get("port")
     baud = payload.get("baud", 921600)

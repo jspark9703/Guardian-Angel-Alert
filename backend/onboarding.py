@@ -34,14 +34,35 @@ class CalibrationState:
     error: str | None = None
 
 
+def _remove_outliers_iqr(values: np.ndarray, k: float = 1.5) -> np.ndarray:
+    """IQR(Tukey's fence) 기반 이상치 제거.
+
+    캘리브레이션 중 "조용한 방" 구간에도 일시적 스파이크(문 닫힘, 짧은 움직임,
+    센서 노이즈 등)가 섞일 수 있는데, 이를 그대로 mean/std에 반영하면 임계값이
+    실제 정상 소음 수준보다 과도하게 높게(둔감하게) 잡힌다. 제거 후 표본이 절반
+    미만으로 줄어들면(=대부분이 이상치로 판정 = IQR 자체가 신뢰할 수 없는 상황)
+    원본을 그대로 반환한다.
+    """
+    if values.size < 4:
+        return values
+    q1, q3 = np.percentile(values, [25, 75])
+    iqr = q3 - q1
+    if iqr <= 0:
+        return values
+    lo, hi = q1 - k * iqr, q3 + k * iqr
+    filtered = values[(values >= lo) & (values <= hi)]
+    return filtered if filtered.size >= max(4, values.size // 2) else values
+
+
 def derive_threshold(values: np.ndarray, k: float, floor: float) -> float:
     """
     Derive a detection threshold from a baseline (quiet-room) signal sample.
 
-    threshold = mean + k*std, clamped to a minimum floor so a perfectly quiet
-    baseline (near-zero std) doesn't produce a degenerate near-zero threshold
-    that would trigger on any tiny noise.
+    threshold = mean + k*std (이상치 제거 후), clamped to a minimum floor so a
+    perfectly quiet baseline (near-zero std) doesn't produce a degenerate
+    near-zero threshold that would trigger on any tiny noise.
     """
+    values = _remove_outliers_iqr(values)
     return float(max(np.mean(values) + k * np.std(values), floor))
 
 
@@ -113,11 +134,11 @@ async def run_calibration(
     calib: CalibrationState,
     executor,
     *,
-    leave_wait_s: float = 10.0,
+    leave_wait_s: float = 30.0,
     silence_confirm_s: float = 0.2,
     silence_timeout_s: float = 3.0,
     resume_timeout_s: float = 20.0,
-    baseline_window_s: float = 20.0,
+    baseline_window_s: float = 30.0,
     poll_interval_s: float = 0.05,
     k_mv: float = 2.0,
     mv_floor: float = 0.3,
@@ -129,17 +150,17 @@ async def run_calibration(
     then capture a baseline_window_s CSI window (expected to be an empty/quiet
     room) and derive presence_mv_threshold/wander_baseline from it.
 
-    leave_wait_s defaults to 10s -- gives the installer time to physically
+    leave_wait_s defaults to 30s -- gives the installer time to physically
     leave the room before anything (train command, AGC, baseline capture)
     begins. Runs before send_line("train") so no measurement starts early.
 
-    baseline_window_s defaults to 20s (longer than the live 6s wander window) --
+    baseline_window_s defaults to 30s (longer than the live 10s wander window) --
     calibration is one-shot so responsiveness doesn't matter, and a longer
     capture gives a more stable Welch PSD baseline estimate. Total run time is
-    ~31s (leave_wait_s + ~0.2s ack + ~1s AGC + baseline_window_s) -- this is
+    ~61s (leave_wait_s + ~0.2s ack + ~1s AGC + baseline_window_s) -- this is
     deliberately the real, uncompressed timing (see docs 기능명세서 conflict
     note in the migration plan); the frontend shows this actual phase/timing
-    rather than a simplified "10s+10s" placeholder.
+    rather than a simplified placeholder.
 
     silence_confirm_s defaults to 0.2s -- comfortably above the ~7ms it takes
     in-flight UART bytes to drain at 921600 baud (one CSI frame is ~650 bytes),

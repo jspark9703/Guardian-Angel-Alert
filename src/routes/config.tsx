@@ -345,8 +345,8 @@ function RealConfigForm({ isServiceAdmin }: { isServiceAdmin: boolean }) {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight mb-1">Pipeline Configuration</h1>
           <p className="text-sm text-muted">
-            실백엔드(로컬 backend/main.py)에 곧바로 반영됩니다 — 재시작 없이, 단 인메모리 전용(재시작 시
-            초기화).
+            실백엔드(로컬 backend/main.py)에 곧바로 반영됩니다 — 재시작 없이, 단 인메모리
+            전용(재시작 시 초기화).
           </p>
         </div>
         <div className="flex gap-2">
@@ -382,7 +382,9 @@ function RealConfigForm({ isServiceAdmin }: { isServiceAdmin: boolean }) {
               field={f}
               value={draft[f.key]}
               onChange={(v) => setDraft({ ...draft, [f.key]: v })}
-              disabled={!detectionEnabled && (f.key === "threshold" || f.key === "cooldown_seconds")}
+              disabled={
+                !detectionEnabled && (f.key === "threshold" || f.key === "cooldown_seconds")
+              }
             />
           ))}
         </div>
@@ -422,8 +424,8 @@ function ConfirmModal({
           <h2 className="text-lg font-semibold text-foreground">알고리즘 설정 변경 확인</h2>
         </div>
         <p className="text-sm text-foreground/80 leading-relaxed mb-2">
-          변경된 파라미터는{" "}
-          <span className="text-foreground font-semibold">즉시 반영</span>되며, 낙상 탐지의{" "}
+          변경된 파라미터는 <span className="text-foreground font-semibold">즉시 반영</span>되며,
+          낙상 탐지의{" "}
           <span className="text-primary font-semibold">오탐/미탐률에 직접적인 영향</span>을 줍니다.
         </p>
         {!isServiceAdmin && (
