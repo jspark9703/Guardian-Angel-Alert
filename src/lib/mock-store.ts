@@ -22,6 +22,10 @@ export interface PipelineConfig {
   merge_gap_s: number;
   max_duration_s: number;
   cooldown_s: number;
+  // mock tick()에는 확률 개념이 없어 실제로 쓰이진 않는다 — FACILITY 설정
+  // 화면에서 실백엔드의 detector.threshold(낙상 신뢰도 임계값)와 UI를
+  // 맞추기 위한 표시 전용(decorative) 필드.
+  threshold: number;
 }
 
 export const DEFAULT_CONFIG: PipelineConfig = {
@@ -40,6 +44,7 @@ export const DEFAULT_CONFIG: PipelineConfig = {
   merge_gap_s: 0.25,
   max_duration_s: 2.0,
   cooldown_s: 3.0,
+  threshold: 0.468,
 };
 
 export interface Facility {

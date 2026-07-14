@@ -379,3 +379,76 @@ export function useMonitorStatus(intervalMs = 1000): MonitorStatus | null {
 
   return status;
 }
+
+// ---- 알고리즘 설정 실시간 반영 (/presence/config, /detection/config) ----
+// presence_loop.py/detector.py 모두 매 tick(0.25초)마다 이 값들을 다시 읽으므로,
+// 여기서 바꾸면 백엔드 재시작 없이 곧바로 반영된다 — 단, 인메모리 전용이라
+// 백엔드 재시작 시 기본값으로 되돌아간다.
+
+export interface PresenceConfigSnapshot {
+  presence_mv_threshold: number;
+  wander_ratio_threshold: number;
+  presence_timeout_s: number;
+  [key: string]: number; // PresenceConfig의 나머지 필드(윈도우/필터 등)도 그대로 내려온다
+}
+
+export interface PresenceConfigUpdate {
+  presence_mv_threshold?: number;
+  wander_ratio_threshold?: number;
+  presence_timeout_s?: number;
+}
+
+export async function fetchPresenceConfig(): Promise<PresenceConfigSnapshot> {
+  const res = await fetch(`${BACKEND_URL}/presence/config`, { signal: AbortSignal.timeout(2000) });
+  if (!res.ok) throw new Error(`presence/config ${res.status}`);
+  return res.json();
+}
+
+export async function updatePresenceConfig(
+  payload: PresenceConfigUpdate,
+): Promise<PresenceConfigSnapshot> {
+  const res = await fetch(`${BACKEND_URL}/presence/config`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(5000),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ detail: `presence/config ${res.status}` }));
+    throw new Error(body.detail ?? `presence/config ${res.status}`);
+  }
+  return res.json();
+}
+
+export interface DetectionConfigSnapshot {
+  enabled: boolean;
+  threshold: number | null;
+  cooldown_seconds: number | null;
+}
+
+export interface DetectionConfigUpdate {
+  threshold?: number;
+  cooldown_seconds?: number;
+}
+
+export async function fetchDetectionConfig(): Promise<DetectionConfigSnapshot> {
+  const res = await fetch(`${BACKEND_URL}/detection/config`, { signal: AbortSignal.timeout(2000) });
+  if (!res.ok) throw new Error(`detection/config ${res.status}`);
+  return res.json();
+}
+
+export async function updateDetectionConfig(
+  payload: DetectionConfigUpdate,
+): Promise<DetectionConfigSnapshot> {
+  const res = await fetch(`${BACKEND_URL}/detection/config`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(5000),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ detail: `detection/config ${res.status}` }));
+    throw new Error(body.detail ?? `detection/config ${res.status}`);
+  }
+  return res.json();
+}

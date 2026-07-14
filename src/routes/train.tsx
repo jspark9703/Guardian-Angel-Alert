@@ -9,7 +9,7 @@ export const Route = createFileRoute("/train")({
 function TrainPage() {
   return (
     <div>
-      <Header title="개인화 모델 학습" criticalCount={0} onlineCount={0} />
+      <Header title="개인화 모델 학습" />
       <div className="p-6 max-w-4xl">
         <div className="bg-surface border border-dashed border-border rounded-lg p-12 text-center">
           <div className="font-mono text-[10px] uppercase tracking-widest text-muted mb-4">Coming Soon</div>

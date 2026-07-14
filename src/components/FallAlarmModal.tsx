@@ -1,14 +1,7 @@
 import { useStore, acknowledgeAlarm, fmtDateTime } from "@/lib/mock-store";
-import { useEffect } from "react";
 
 export function FallAlarmModal() {
   const alarm = useStore((s) => s.alarm);
-
-  useEffect(() => {
-    if (!alarm) return;
-    const t = setTimeout(() => acknowledgeAlarm("PENDING"), 30_000);
-    return () => clearTimeout(t);
-  }, [alarm]);
 
   if (!alarm) return null;
 

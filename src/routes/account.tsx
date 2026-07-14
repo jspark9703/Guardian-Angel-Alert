@@ -36,7 +36,7 @@ function AccountPage() {
 
   return (
     <div>
-      <Header title="계정 관리" criticalCount={0} onlineCount={0} />
+      <Header title="계정 관리" />
       <div className="p-6 space-y-5 max-w-3xl">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight mb-1">Account Settings</h1>

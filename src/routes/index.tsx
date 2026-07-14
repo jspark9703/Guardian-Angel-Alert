@@ -15,6 +15,7 @@ import {
   presenceColor,
   unifiedStatusLabel,
   unifiedStatusColor,
+  type StateMachine,
 } from "@/lib/mock-store";
 import { toast } from "sonner";
 import { EventLogPanel } from "@/components/EventLogPanel";
@@ -50,8 +51,6 @@ function MonitoringPage() {
   const mvHistory = useStore((s) => s.mvHistory);
   const allFalls = useStore((s) => s.falls);
   const falls = allFalls.filter((f) => residents.some((r) => r.id === f.residentId));
-  const criticalCount = residents.filter((r) => r.state === "FALL" || r.state === "SUSPECT").length;
-  const onlineCount = residents.filter((r) => r.online).length;
 
   const chartData = mvHistory.map((p, i) => ({ i, mv: Number(p.mv.toFixed(3)) }));
   const threshold = active?.thresholdOverride ?? config.mv_threshold;
@@ -77,6 +76,9 @@ function MonitoringPage() {
     homeDevices.find((d) => d.id === activeDeviceId) ??
     homeDevices.find((d) => d.id === primaryDeviceId) ??
     homeDevices[0];
+  const selectedResident = residents.find(
+    (r) => r.deviceId === selectedDevice?.id || (r.deviceIds ?? []).includes(selectedDevice?.id ?? ""),
+  );
   const showDevicePicker = !isFacility && homeDevices.length > 1;
   const showRealData =
     homeDevices.length <= 1 || !selectedDevice || selectedDevice.id === primaryDeviceId;
@@ -86,7 +88,7 @@ function MonitoringPage() {
 
   return (
     <div className="flex flex-col">
-      <Header title={title} criticalCount={criticalCount} onlineCount={onlineCount} />
+      <Header title={title} />
 
       <div className="p-6 space-y-6">
         {isFacility && !running && (
@@ -187,56 +189,64 @@ function MonitoringPage() {
           </section>
         )}
 
-        <section
-          className={`grid gap-4 ${isFacility ? "grid-cols-3" : "grid-cols-2 lg:grid-cols-4"}`}
-        >
+        <section className="grid gap-4 grid-cols-2 lg:grid-cols-4">
           {isFacility ? (
             <>
               <StatCard
-                label="현재 상태"
-                value={unifiedStatusLabel(active?.state ?? "IDLE", active?.presence ?? "ABSENT")}
-                sub={`${active?.name ?? "—"} (${active?.room ?? "—"}호)`}
-                tone={
-                  active?.state === "FALL"
-                    ? "danger"
-                    : active?.state === "SUSPECT"
-                      ? "warn"
-                      : active?.state === "COOLDOWN"
-                        ? "default"
-                        : active?.presence === "PRESENT"
-                          ? "success"
-                          : "default"
+                label="대상자"
+                value={active?.name ?? "미등록"}
+                sub={activeDevice ? `${activeDevice.room}호` : "장치 미등록"}
+              />
+              <StatCard
+                label="재실감지"
+                value={presenceLabel(active?.presence ?? "ABSENT")}
+                sub={`MV ${(active?.mv ?? 0).toFixed(2)} / 임계값 ${threshold.toFixed(2)}`}
+                tone={active?.presence === "PRESENT" ? "success" : "default"}
+              />
+              <StatCard
+                label="낙상 감지"
+                value={stateLabel(active?.state ?? "IDLE")}
+                sub={`DNN 신뢰도 ${((active?.confidence ?? 0) * 100).toFixed(1)}% · CSI-NET v2`}
+                tone={fallTone(active?.state ?? "IDLE")}
+              />
+              <StatCard
+                label="수신기 상태"
+                value={activeDevice?.online ? "수신 중" : "연결 끊김"}
+                sub={
+                  activeDevice
+                    ? `RSSI ${activeDevice.current_rssi}dBm · ${activeDevice.connection}`
+                    : "장치 없음"
                 }
-              />
-              <StatCard
-                label="DNN 낙상 신뢰도"
-                value={`${((active?.confidence ?? 0) * 100).toFixed(1)}%`}
-                sub="Model: CSI-NET v2 (딥러닝)"
-              />
-              <StatCard
-                label="움직임 감지 임계값"
-                value={threshold.toFixed(3)}
-                sub={active?.thresholdOverride != null ? "거주자별 오버라이드" : "전역 설정"}
+                tone={activeDevice?.online ? "success" : "danger"}
               />
             </>
           ) : (
             <>
               <StatCard
-                label="수신기 상태"
-                value={effectiveLiveMode ? "수신 중" : "연결 끊김"}
-                sub={
-                  effectiveLiveMode
-                    ? `${live.last?.hz_1s ?? 0}Hz · RSSI ${live.last?.rssi ?? "—"}dBm`
-                    : !showRealData
-                      ? "다른 장치 선택됨 · 위 배너 참고"
-                      : backendUp
-                        ? "수신기(USB) 미연결 · 장치 설정에서 포트 확인"
-                        : "로컬 백엔드 미실행 (backend/main.py)"
-                }
-                tone={effectiveLiveMode ? "success" : "danger"}
+                label="대상자"
+                value={selectedResident?.name ?? "미등록"}
+                sub={selectedDevice ? `${selectedDevice.room}호` : "등록된 장치 없음"}
               />
               <StatCard
-                label="낙상 판정"
+                label="재실감지"
+                value={
+                  !effectiveLiveMode
+                    ? "연결 끊김"
+                    : presenceLabel(live.last?.presence_state === "present" ? "PRESENT" : "ABSENT")
+                }
+                sub={
+                  effectiveLiveMode && live.last?.mv_current != null
+                    ? `MV ${live.last.mv_current.toFixed(2)} / 임계값 ${(live.last.presence_mv_threshold ?? liveMvThreshold).toFixed(2)}`
+                    : effectiveLiveMode
+                      ? "장치 설정에서 캘리브레이션을 진행하세요"
+                      : "백엔드/수신기 연결 후 표시됩니다"
+                }
+                tone={
+                  effectiveLiveMode && live.last?.presence_state === "present" ? "success" : "default"
+                }
+              />
+              <StatCard
+                label="낙상 감지"
                 value={
                   !effectiveLiveMode
                     ? "연결 끊김"
@@ -254,49 +264,22 @@ function MonitoringPage() {
                 tone={
                   !effectiveLiveMode || live.last?.proba_fall == null
                     ? "default"
-                    : live.last?.detect_state === "FALL"
-                      ? "danger"
-                      : live.last?.detect_state === "SUSPECT"
-                        ? "warn"
-                        : "success"
+                    : fallTone(live.last?.detect_state ?? "IDLE")
                 }
               />
               <StatCard
-                label="판정 임계값"
-                value={
-                  effectiveLiveMode && live.last?.threshold != null
-                    ? live.last.threshold.toFixed(3)
-                    : threshold.toFixed(3)
-                }
+                label="수신기 상태"
+                value={effectiveLiveMode ? "수신 중" : "연결 끊김"}
                 sub={
-                  effectiveLiveMode && live.last?.threshold != null
-                    ? "모델 softmax 확률 기준 · 5윈도우 다수결 확정"
-                    : "전역 설정 (mock)"
+                  effectiveLiveMode
+                    ? `${live.last?.hz_1s ?? 0}Hz · RSSI ${live.last?.rssi ?? "—"}dBm`
+                    : !showRealData
+                      ? "다른 장치 선택됨 · 위 배너 참고"
+                      : backendUp
+                        ? "수신기(USB) 미연결 · 장치 설정에서 포트 확인"
+                        : "로컬 백엔드 미실행 (backend/main.py)"
                 }
-              />
-              <StatCard
-                label="움직임 감지 (재실용)"
-                value={
-                  !effectiveLiveMode
-                    ? "연결 끊김"
-                    : live.last?.mv_current != null
-                      ? live.last.mv_current.toFixed(2)
-                      : "캘리브레이션 필요"
-                }
-                sub={
-                  effectiveLiveMode && live.last?.presence_mv_threshold != null
-                    ? `임계값 ${live.last.presence_mv_threshold.toFixed(2)} · 낙상 DL 모델과 병렬 계산되는 별도 신호`
-                    : effectiveLiveMode
-                      ? "장치 설정에서 캘리브레이션을 진행하세요"
-                      : "백엔드/수신기 연결 후 표시됩니다"
-                }
-                tone={
-                  !effectiveLiveMode || live.last?.mv_current == null
-                    ? "default"
-                    : live.last.mv_current >= (live.last.presence_mv_threshold ?? Infinity)
-                      ? "warn"
-                      : "success"
-                }
+                tone={effectiveLiveMode ? "success" : "danger"}
               />
             </>
           )}
@@ -496,24 +479,41 @@ function MonitoringPage() {
   );
 }
 
-export function Header({
-  title,
-  criticalCount,
-  onlineCount,
-}: {
-  title: string;
-  criticalCount: number;
-  onlineCount: number;
-}) {
+const STATE_SEVERITY: StateMachine[] = ["FALL", "SUSPECT", "COOLDOWN", "IDLE"];
+
+function worstState(list: { state: StateMachine }[]): StateMachine {
+  for (const s of STATE_SEVERITY) {
+    if (list.some((r) => r.state === s)) return s;
+  }
+  return "IDLE";
+}
+
+function fallTone(state: StateMachine): "danger" | "warn" | "default" {
+  if (state === "FALL") return "danger";
+  if (state === "SUSPECT") return "warn";
+  return "default";
+}
+
+export function Header({ title }: { title: string }) {
   const [now, setNow] = useState<string>("");
   const user = useCurrentUser();
+  const isFacility = user?.service === "FACILITY";
+  const running = useStore((s) => s.running);
+  const backendConnected = useStore((s) => s.backendConnected);
+  const alarm = useStore((s) => s.alarm);
   const allResidents = useStore((s) => s.residents);
-  const scoped =
-    user?.service === "FACILITY"
-      ? allResidents.filter((r) => r.facilityId === user?.facilityId)
-      : allResidents.filter((r) => r.ownerUserId === user?.id);
+  const scoped = isFacility
+    ? allResidents.filter((r) => r.facilityId === user?.facilityId)
+    : allResidents.filter((r) => r.ownerUserId === user?.id);
   const presentCount = scoped.filter((r) => r.presence === "PRESENT").length;
   const absentCount = scoped.length - presentCount;
+  // FACILITY는 mock 시뮬레이션(running), HOME은 실백엔드 연결(backendConnected)
+  // 기준 — AppSidebar의 상태 점과 동일한 판단 기준을 재사용한다.
+  const operational = isFacility ? running : backendConnected;
+  // alarm이 있으면(사용자가 명시적으로 확인하기 전까지) FALL을 그대로 유지한다
+  // — 개별 resident.state는 mock tick()에서 바로 COOLDOWN으로 넘어가더라도
+  // 헤더는 alarm 기준으로 별도 판단한다.
+  const displayState = alarm ? "FALL" : worstState(scoped);
   useEffect(() => {
     const fmt = () => setNow(new Date().toLocaleString("sv-SE").replace("T", " ").slice(0, 19));
     fmt();
@@ -526,9 +526,13 @@ export function Header({
         <h2 className="text-sm font-medium">{title}</h2>
         <div className="flex gap-2">
           <span
-            className={`px-2 py-0.5 rounded bg-primary/10 text-primary text-[10px] font-mono border border-primary/20 ${criticalCount > 0 ? "animate-pulse" : ""}`}
+            className={`px-2 py-0.5 rounded text-[10px] font-mono border font-bold ${stateColor(displayState)} ${
+              displayState === "FALL"
+                ? "bg-primary/10 border-primary/20 animate-pulse"
+                : "bg-surface border-border"
+            }`}
           >
-            CRITICAL: {criticalCount}
+            {stateLabel(displayState)}
           </span>
           <span
             className={`px-2 py-0.5 rounded text-[10px] font-mono border ${
@@ -538,7 +542,7 @@ export function Header({
             }`}
             title="재실 감지: 움직임+WANDER 통합 판단"
           >
-            {user?.service === "FACILITY"
+            {isFacility
               ? presentCount > 0
                 ? `재실 ${presentCount}`
                 : `퇴실 ${absentCount}`
@@ -546,8 +550,14 @@ export function Header({
                 ? "재실"
                 : "퇴실"}
           </span>
-          <span className="px-2 py-0.5 rounded bg-surface text-muted text-[10px] font-mono border border-border">
-            ONLINE: {onlineCount}
+          <span
+            className={`px-2 py-0.5 rounded text-[10px] font-mono border ${
+              operational
+                ? "bg-success/10 text-success border-success/20"
+                : "bg-surface text-muted border-border"
+            }`}
+          >
+            {operational ? "ONLINE" : "OFFLINE"}
           </span>
         </div>
       </div>

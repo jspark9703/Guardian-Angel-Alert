@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { Header } from "./index";
-import { useScopedLogs, fmtDateTime, useCurrentUser, useStore } from "@/lib/mock-store";
+import { useScopedLogs, fmtDateTime } from "@/lib/mock-store";
 
 export const Route = createFileRoute("/event-log")({
   head: () => ({ meta: [{ title: "이벤트 로그 · CSI-Guard" }] }),
@@ -9,14 +9,6 @@ export const Route = createFileRoute("/event-log")({
 });
 
 function EventLogPage() {
-  const user = useCurrentUser();
-  const allResidents = useStore((s) => s.residents);
-  const residents = user?.service === "FACILITY"
-    ? allResidents.filter((r) => r.facilityId === user.facilityId)
-    : allResidents.filter((r) => r.ownerUserId === user?.id);
-  const criticalCount = residents.filter((r) => r.state === "FALL" || r.state === "SUSPECT").length;
-  const onlineCount = residents.filter((r) => r.online).length;
-
   const logs = useScopedLogs();
   const [filter, setFilter] = useState<string>("ALL");
   const [query, setQuery] = useState<string>("");
@@ -31,7 +23,7 @@ function EventLogPage() {
 
   return (
     <div>
-      <Header title="이벤트 로그" criticalCount={criticalCount} onlineCount={onlineCount} />
+      <Header title="이벤트 로그" />
       <div className="p-6 space-y-4 max-w-6xl">
         <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
           <div>

@@ -41,7 +41,7 @@ function HistoryPage() {
 
   return (
     <div>
-      <Header title="낙상 탐지 이력" criticalCount={0} onlineCount={0} />
+      <Header title="낙상 탐지 이력" />
       <div className="p-6 space-y-4 max-w-6xl">
         <div className="flex justify-between items-center">
           <div>

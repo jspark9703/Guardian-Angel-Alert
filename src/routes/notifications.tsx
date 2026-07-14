@@ -34,7 +34,7 @@ function NotificationsPage() {
 
   return (
     <div>
-      <Header title="알림 게이트웨이" criticalCount={0} onlineCount={0} />
+      <Header title="알림 게이트웨이" />
       <div className="p-6 space-y-6 max-w-6xl">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight mb-1">Notification Gateway</h1>

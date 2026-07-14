@@ -89,11 +89,7 @@ function DevicesPage() {
 
   return (
     <div>
-      <Header
-        title={isFacility ? "장치 설정 · ESP32 관리" : "장치 설정 · 가정 내 장치"}
-        criticalCount={0}
-        onlineCount={devices.filter((d) => d.online).length}
-      />
+      <Header title={isFacility ? "장치 설정 · ESP32 관리" : "장치 설정 · 가정 내 장치"} />
       <div className="p-6 space-y-4 max-w-7xl">
         <div className="flex justify-between items-center">
           <div>

@@ -65,11 +65,7 @@ function ResidentsPage() {
 
   return (
     <div>
-      <Header
-        title={title}
-        criticalCount={0}
-        onlineCount={residents.filter((r) => r.online).length}
-      />
+      <Header title={title} />
       <div className="p-6 space-y-4 max-w-6xl">
         <div className="flex justify-between items-center">
           <div>

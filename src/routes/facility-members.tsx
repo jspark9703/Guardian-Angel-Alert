@@ -28,7 +28,7 @@ function FacilityMembersPage() {
 
   return (
     <div>
-      <Header title="시설 멤버 관리 (Root)" criticalCount={0} onlineCount={0} />
+      <Header title="시설 멤버 관리 (Root)" />
       <div className="p-6 space-y-6 max-w-5xl">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight mb-1">Facility Members · IAM</h1>
