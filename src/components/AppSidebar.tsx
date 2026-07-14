@@ -1,8 +1,17 @@
 import { Link, useRouterState, useNavigate } from "@tanstack/react-router";
-import { useStore, stateLabel, stateColor, fmtDateTime, useCurrentUser, useCurrentFacility, logout } from "@/lib/mock-store";
+import {
+  useStore,
+  stateLabel,
+  stateColor,
+  fmtDateTime,
+  useCurrentUser,
+  useCurrentFacility,
+  logout,
+} from "@/lib/mock-store";
 
 export function AppSidebar() {
   const running = useStore((s) => s.running);
+  const backendConnected = useStore((s) => s.backendConnected);
   const resident = useStore((s) => s.residents.find((r) => r.id === s.activeResidentId));
   const lastFallAt = useStore((s) => s.lastFallAt);
   const pathname = useRouterState({ select: (r) => r.location.pathname });
@@ -13,6 +22,9 @@ export function AppSidebar() {
   const currentState = resident?.state ?? "IDLE";
   const isFacility = user?.service === "FACILITY";
   const isRoot = user?.role === "ROOT";
+  // FACILITY는 mock 시뮬레이션(running) 기준, HOME은 실백엔드 연결(backendConnected)
+  // 기준으로 표시한다 — mock running 플래그는 HOME 실장치와 무관하기 때문.
+  const operational = isFacility ? running : backendConnected;
 
   const navMain = [
     { to: "/", label: "실시간 관제" },
@@ -21,25 +33,29 @@ export function AppSidebar() {
     { to: "/devices", label: "장치 설정" },
   ];
   const navMgmt = [
-    ...(isFacility ? [{ to: "/residents", label: "입소자 관리" }] : []),
+    { to: "/residents", label: isFacility ? "입소자 관리" : "재실 대상 관리" },
     ...(isFacility && isRoot ? [{ to: "/facility-members", label: "시설 멤버" }] : []),
     { to: "/notifications", label: "알림 게이트웨이" },
     { to: "/config", label: "알고리즘 설정" },
     { to: "/train", label: "모델 학습" },
   ];
 
-
-  const handleLogout = () => { logout(); navigate({ to: "/login" }); };
+  const handleLogout = () => {
+    logout();
+    navigate({ to: "/login" });
+  };
 
   return (
     <aside className="w-64 border-r border-border flex flex-col shrink-0 bg-background">
       <div className="p-6 border-b border-border">
         <div className="flex items-center gap-2 mb-1">
-          <div className={`size-3 rounded-full ${running ? "bg-success animate-signal" : "bg-muted"}`} />
+          <div
+            className={`size-3 rounded-full ${operational ? "bg-success animate-signal" : "bg-muted"}`}
+          />
           <h1 className="font-mono font-bold tracking-tighter text-lg">CSI-GUARD v4.2</h1>
         </div>
         <p className="text-[10px] text-muted uppercase tracking-widest font-mono">
-          {running ? "System Operational" : "System Idle"}
+          {operational ? "System Operational" : "System Idle"}
         </p>
       </div>
 
@@ -54,27 +70,43 @@ export function AppSidebar() {
               {isFacility ? `${facility?.name ?? "-"} · ${user.service}` : "가정 서비스 · HOME"}
             </div>
             {isFacility && facility && (
-              <div className="text-[9px] font-mono text-muted">INVITE: <span className="text-foreground/70">{facility.code}</span></div>
+              <div className="text-[9px] font-mono text-muted">
+                INVITE: <span className="text-foreground/70">{facility.code}</span>
+              </div>
             )}
           </div>
         </div>
       )}
 
       <nav className="flex-1 px-4 py-4 space-y-1 overflow-y-auto">
-        <div className="text-[10px] font-semibold text-muted mb-2 px-2 uppercase tracking-wider">Main Dashboard</div>
-        {navMain.map((n) => <NavLink key={n.to} to={n.to} label={n.label} active={pathname === n.to} />)}
-        <div className="pt-4 text-[10px] font-semibold text-muted mb-2 px-2 uppercase tracking-wider">Management</div>
-        {navMgmt.map((n) => <NavLink key={n.to} to={n.to} label={n.label} active={pathname === n.to} />)}
+        <div className="text-[10px] font-semibold text-muted mb-2 px-2 uppercase tracking-wider">
+          Main Dashboard
+        </div>
+        {navMain.map((n) => (
+          <NavLink key={n.to} to={n.to} label={n.label} active={pathname === n.to} />
+        ))}
+        <div className="pt-4 text-[10px] font-semibold text-muted mb-2 px-2 uppercase tracking-wider">
+          Management
+        </div>
+        {navMgmt.map((n) => (
+          <NavLink key={n.to} to={n.to} label={n.label} active={pathname === n.to} />
+        ))}
 
-        <div className="pt-6 text-[10px] font-semibold text-muted mb-2 px-2 uppercase tracking-wider">Fall Status</div>
+        <div className="pt-6 text-[10px] font-semibold text-muted mb-2 px-2 uppercase tracking-wider">
+          Fall Status
+        </div>
         <div className="px-2 space-y-2">
           <div className="flex items-center justify-between text-xs">
             <span className="text-muted font-mono">STATE</span>
-            <span className={`font-mono font-medium ${stateColor(currentState)}`}>{stateLabel(currentState)}</span>
+            <span className={`font-mono font-medium ${stateColor(currentState)}`}>
+              {stateLabel(currentState)}
+            </span>
           </div>
           <div className="flex items-center justify-between text-[10px] font-mono">
             <span className="text-muted">LAST FALL</span>
-            <span className="text-foreground/70">{lastFallAt ? fmtDateTime(lastFallAt).slice(-8) : "—"}</span>
+            <span className="text-foreground/70">
+              {lastFallAt ? fmtDateTime(lastFallAt).slice(-8) : "—"}
+            </span>
           </div>
         </div>
       </nav>

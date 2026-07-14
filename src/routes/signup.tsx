@@ -21,9 +21,12 @@ function SignupPage() {
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     const res = signup({ email, password, name, service, facilityMode, facilityName, inviteCode });
-    if (!res.ok) { toast.error(res.error ?? "가입 실패"); return; }
-    toast.success("가입 완료 · 초기 설정을 진행합니다");
-    navigate({ to: "/onboarding" });
+    if (!res.ok) {
+      toast.error(res.error ?? "가입 실패");
+      return;
+    }
+    toast.success("가입 완료 · 사이드바의 재실 대상 관리에서 등록을 시작하세요");
+    navigate({ to: "/" });
   };
 
   return (
@@ -31,56 +34,115 @@ function SignupPage() {
       <div className="w-full max-w-md">
         <div className="mb-8 text-center">
           <div className="font-mono font-bold text-2xl tracking-tighter">CSI-GUARD v4.2</div>
-          <p className="text-xs font-mono text-muted uppercase tracking-widest mt-1">Create Account</p>
+          <p className="text-xs font-mono text-muted uppercase tracking-widest mt-1">
+            Create Account
+          </p>
         </div>
-        <form onSubmit={submit} className="bg-surface border border-border rounded-lg p-6 space-y-4">
+        <form
+          onSubmit={submit}
+          className="bg-surface border border-border rounded-lg p-6 space-y-4"
+        >
           <Field label="이름">
-            <input value={name} onChange={(e) => setName(e.target.value)} required className={inputCls} />
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              required
+              className={inputCls}
+            />
           </Field>
           <Field label="이메일">
-            <input value={email} onChange={(e) => setEmail(e.target.value)} type="email" required className={inputCls} />
+            <input
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              type="email"
+              required
+              className={inputCls}
+            />
           </Field>
           <Field label="비밀번호">
-            <input value={password} onChange={(e) => setPassword(e.target.value)} type="password" required minLength={4} className={inputCls} />
+            <input
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              type="password"
+              required
+              minLength={4}
+              className={inputCls}
+            />
           </Field>
 
           <Field label="이용 서비스">
             <div className="grid grid-cols-2 gap-2">
-              <ServiceCard active={service === "HOME"} onClick={() => setService("HOME")} title="HOME" desc="가정 · 1인 거주" />
-              <ServiceCard active={service === "FACILITY"} onClick={() => setService("FACILITY")} title="FACILITY" desc="요양원 · 다중 거주자" />
+              <ServiceCard
+                active={service === "HOME"}
+                onClick={() => setService("HOME")}
+                title="HOME"
+                desc="가정 · 1인 거주"
+              />
+              <ServiceCard
+                active={service === "FACILITY"}
+                onClick={() => setService("FACILITY")}
+                title="FACILITY"
+                desc="요양원 · 다중 거주자"
+              />
             </div>
           </Field>
 
           {service === "FACILITY" && (
             <div className="border border-border rounded p-3 space-y-3 bg-background">
               <div className="grid grid-cols-2 gap-2">
-                <button type="button" onClick={() => setFacilityMode("ROOT")}
-                  className={`py-2 rounded text-xs font-mono uppercase border ${facilityMode === "ROOT" ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted"}`}>
+                <button
+                  type="button"
+                  onClick={() => setFacilityMode("ROOT")}
+                  className={`py-2 rounded text-xs font-mono uppercase border ${facilityMode === "ROOT" ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted"}`}
+                >
                   시설 신규등록 (Root)
                 </button>
-                <button type="button" onClick={() => setFacilityMode("MEMBER")}
-                  className={`py-2 rounded text-xs font-mono uppercase border ${facilityMode === "MEMBER" ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted"}`}>
+                <button
+                  type="button"
+                  onClick={() => setFacilityMode("MEMBER")}
+                  className={`py-2 rounded text-xs font-mono uppercase border ${facilityMode === "MEMBER" ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted"}`}
+                >
                   기존 시설 참여 (Member)
                 </button>
               </div>
               {facilityMode === "ROOT" ? (
                 <Field label="시설명">
-                  <input value={facilityName} onChange={(e) => setFacilityName(e.target.value)} placeholder="예: 강남요양원" className={inputCls} required />
+                  <input
+                    value={facilityName}
+                    onChange={(e) => setFacilityName(e.target.value)}
+                    placeholder="예: 강남요양원"
+                    className={inputCls}
+                    required
+                  />
                 </Field>
               ) : (
                 <Field label="초대 코드">
-                  <input value={inviteCode} onChange={(e) => setInviteCode(e.target.value)} placeholder="예: GN-8421" className={inputCls} required />
-                  <p className="text-[10px] font-mono text-muted mt-1">시설 Root 계정으로부터 코드를 받으세요. 데모: GN-8421</p>
+                  <input
+                    value={inviteCode}
+                    onChange={(e) => setInviteCode(e.target.value)}
+                    placeholder="예: GN-8421"
+                    className={inputCls}
+                    required
+                  />
+                  <p className="text-[10px] font-mono text-muted mt-1">
+                    시설 Root 계정으로부터 코드를 받으세요. 데모: GN-8421
+                  </p>
                 </Field>
               )}
             </div>
           )}
 
-          <button type="submit" className="w-full py-2.5 bg-primary text-primary-foreground rounded text-xs font-mono uppercase font-bold tracking-widest hover:brightness-110">
+          <button
+            type="submit"
+            className="w-full py-2.5 bg-primary text-primary-foreground rounded text-xs font-mono uppercase font-bold tracking-widest hover:brightness-110"
+          >
             가입하기
           </button>
           <div className="text-center text-xs text-muted">
-            이미 계정이 있으신가요? <Link to="/login" className="text-primary font-medium">로그인</Link>
+            이미 계정이 있으신가요?{" "}
+            <Link to="/login" className="text-primary font-medium">
+              로그인
+            </Link>
           </div>
         </form>
       </div>
@@ -88,13 +150,33 @@ function SignupPage() {
   );
 }
 
-const inputCls = "w-full bg-background border border-border rounded px-3 py-2 text-sm font-mono focus:outline-none focus:border-muted";
+const inputCls =
+  "w-full bg-background border border-border rounded px-3 py-2 text-sm font-mono focus:outline-none focus:border-muted";
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return <div><label className="text-[10px] font-mono uppercase text-muted">{label}</label><div className="mt-1">{children}</div></div>;
-}
-function ServiceCard({ active, onClick, title, desc }: { active: boolean; onClick: () => void; title: string; desc: string }) {
   return (
-    <button type="button" onClick={onClick} className={`text-left p-3 rounded border ${active ? "border-primary bg-primary/5" : "border-border bg-background"}`}>
+    <div>
+      <label className="text-[10px] font-mono uppercase text-muted">{label}</label>
+      <div className="mt-1">{children}</div>
+    </div>
+  );
+}
+function ServiceCard({
+  active,
+  onClick,
+  title,
+  desc,
+}: {
+  active: boolean;
+  onClick: () => void;
+  title: string;
+  desc: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`text-left p-3 rounded border ${active ? "border-primary bg-primary/5" : "border-border bg-background"}`}
+    >
       <div className="text-xs font-mono font-bold">{title}</div>
       <div className="text-[10px] text-muted mt-1">{desc}</div>
     </button>

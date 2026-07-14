@@ -7,7 +7,9 @@ import {
   stateColor,
   fmtDateTime,
   setActiveResident,
+  setActiveDevice,
   useCurrentUser,
+  useHomePrimaryDeviceId,
   simulateFall,
   presenceLabel,
   presenceColor,
@@ -59,7 +61,26 @@ function MonitoringPage() {
   const backendUp = live.wsUp;
   const serialUp = live.last?.connected ?? false;
   const liveMode = backendUp && serialUp;
-  const liveChartData = live.history.map((p, i) => ({ i, amp: p.amp_std ?? 0 }));
+  // 실데이터 차트는 진폭 std 근사치가 아니라 실제 움직임(MV) 신호를 그린다 —
+  // presence_loop.py가 DL 모델과 무관하게 항상 계산해 /ws/live로 내려주는 값.
+  const liveChartData = live.history.map((p, i) => ({ i, mv: p.mv_current ?? 0 }));
+  const liveMvThreshold = live.last?.presence_mv_threshold ?? threshold;
+
+  // 다중 장치 선택(프론트엔드 전용) — 실백엔드는 여전히 장치 1대만 지원하므로,
+  // 대표 장치(useHomePrimaryDeviceId)가 아닌 다른 장치를 고르면 "아직 미연결"로
+  // 명시 표시한다(가짜 mock 데이터로 위장하지 않음).
+  const allDevices = useStore((s) => s.devices);
+  const homeDevices = !isFacility ? allDevices.filter((d) => d.ownerUserId === user?.id) : [];
+  const activeDeviceId = useStore((s) => s.activeDeviceId);
+  const primaryDeviceId = useHomePrimaryDeviceId();
+  const selectedDevice =
+    homeDevices.find((d) => d.id === activeDeviceId) ??
+    homeDevices.find((d) => d.id === primaryDeviceId) ??
+    homeDevices[0];
+  const showDevicePicker = !isFacility && homeDevices.length > 1;
+  const showRealData =
+    homeDevices.length <= 1 || !selectedDevice || selectedDevice.id === primaryDeviceId;
+  const effectiveLiveMode = liveMode && showRealData;
 
   const title = isFacility ? "요양원 통합 대시보드" : "가정 모니터링 대시보드";
 
@@ -68,11 +89,49 @@ function MonitoringPage() {
       <Header title={title} criticalCount={criticalCount} onlineCount={onlineCount} />
 
       <div className="p-6 space-y-6">
-        {!running && (
+        {isFacility && !running && (
           <div className="bg-surface border border-warning/40 rounded p-4 flex items-center gap-3">
             <div className="size-2 rounded-full bg-warning" />
             <div className="text-sm">
               <span className="font-semibold text-warning">모니터링 정지 상태</span>
+            </div>
+          </div>
+        )}
+
+        {showDevicePicker && (
+          <section>
+            <SectionTitle>장치 선택 · 선택한 장치의 모니터링 정보만 표시</SectionTitle>
+            <div className="flex flex-wrap gap-2">
+              {homeDevices.map((d) => (
+                <button
+                  key={d.id}
+                  onClick={() => setActiveDevice(d.id)}
+                  className={`px-3 py-1.5 rounded border text-xs font-mono ${
+                    selectedDevice?.id === d.id
+                      ? "border-foreground bg-surface"
+                      : "border-border text-muted hover:text-foreground"
+                  }`}
+                >
+                  {d.name}
+                  {d.id === primaryDeviceId && (
+                    <span className="ml-1.5 text-[9px] text-success uppercase">live</span>
+                  )}
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {!isFacility && !showRealData && (
+          <div className="bg-surface border border-warning/40 rounded p-4 flex items-center gap-3">
+            <div className="size-2 rounded-full bg-warning" />
+            <div className="text-sm">
+              <span className="font-semibold text-warning">{selectedDevice?.name}</span>
+              <span className="text-muted">
+                {" "}
+                · 아직 로컬 백엔드에 연결되지 않은 장치입니다. 현재 1대의 실장치만 동시 연동을
+                지원합니다.
+              </span>
             </div>
           </div>
         )}
@@ -164,34 +223,36 @@ function MonitoringPage() {
             <>
               <StatCard
                 label="수신기 상태"
-                value={liveMode ? "수신 중" : "연결 끊김"}
+                value={effectiveLiveMode ? "수신 중" : "연결 끊김"}
                 sub={
-                  liveMode
+                  effectiveLiveMode
                     ? `${live.last?.hz_1s ?? 0}Hz · RSSI ${live.last?.rssi ?? "—"}dBm`
-                    : backendUp
-                      ? "수신기(USB) 미연결 · 장치 설정에서 포트 확인"
-                      : "로컬 백엔드 미실행 (backend/main.py)"
+                    : !showRealData
+                      ? "다른 장치 선택됨 · 위 배너 참고"
+                      : backendUp
+                        ? "수신기(USB) 미연결 · 장치 설정에서 포트 확인"
+                        : "로컬 백엔드 미실행 (backend/main.py)"
                 }
-                tone={liveMode ? "success" : "danger"}
+                tone={effectiveLiveMode ? "success" : "danger"}
               />
               <StatCard
                 label="낙상 판정"
                 value={
-                  !liveMode
+                  !effectiveLiveMode
                     ? "연결 끊김"
                     : live.last?.proba_fall != null
                       ? stateLabel(live.last.detect_state ?? "IDLE")
                       : "모델 미가동"
                 }
                 sub={
-                  liveMode && live.last?.proba_fall != null
+                  effectiveLiveMode && live.last?.proba_fall != null
                     ? `낙상 확률 ${(live.last.proba_fall * 100).toFixed(1)}% · 3초 윈도우 / 0.25초 주기`
-                    : liveMode
+                    : effectiveLiveMode
                       ? "백엔드가 --no-model로 실행 중이거나 모델 로드 실패"
                       : "백엔드/수신기 연결 후 표시됩니다"
                 }
                 tone={
-                  !liveMode || live.last?.proba_fall == null
+                  !effectiveLiveMode || live.last?.proba_fall == null
                     ? "default"
                     : live.last?.detect_state === "FALL"
                       ? "danger"
@@ -203,12 +264,12 @@ function MonitoringPage() {
               <StatCard
                 label="판정 임계값"
                 value={
-                  liveMode && live.last?.threshold != null
+                  effectiveLiveMode && live.last?.threshold != null
                     ? live.last.threshold.toFixed(3)
                     : threshold.toFixed(3)
                 }
                 sub={
-                  liveMode && live.last?.threshold != null
+                  effectiveLiveMode && live.last?.threshold != null
                     ? "모델 softmax 확률 기준 · 5윈도우 다수결 확정"
                     : "전역 설정 (mock)"
                 }
@@ -216,21 +277,21 @@ function MonitoringPage() {
               <StatCard
                 label="움직임 감지 (재실용)"
                 value={
-                  !liveMode
+                  !effectiveLiveMode
                     ? "연결 끊김"
                     : live.last?.mv_current != null
                       ? live.last.mv_current.toFixed(2)
                       : "캘리브레이션 필요"
                 }
                 sub={
-                  liveMode && live.last?.presence_mv_threshold != null
+                  effectiveLiveMode && live.last?.presence_mv_threshold != null
                     ? `임계값 ${live.last.presence_mv_threshold.toFixed(2)} · 낙상 DL 모델과 병렬 계산되는 별도 신호`
-                    : liveMode
+                    : effectiveLiveMode
                       ? "장치 설정에서 캘리브레이션을 진행하세요"
                       : "백엔드/수신기 연결 후 표시됩니다"
                 }
                 tone={
-                  !liveMode || live.last?.mv_current == null
+                  !effectiveLiveMode || live.last?.mv_current == null
                     ? "default"
                     : live.last.mv_current >= (live.last.presence_mv_threshold ?? Infinity)
                       ? "warn"
@@ -254,7 +315,7 @@ function MonitoringPage() {
                   <span className="text-[10px] font-mono text-muted px-2 py-0.5 rounded bg-background border border-border">
                     MQTT: {activeDevice?.mqttTopic ?? "—"} · {chartData.length} samples
                   </span>
-                ) : liveMode ? (
+                ) : effectiveLiveMode ? (
                   <span className="text-[10px] font-mono text-success px-2 py-0.5 rounded bg-success/10 border border-success/30">
                     ● LIVE · {live.last?.hz_1s ?? 0}Hz · {live.history.length} samples
                   </span>
@@ -323,7 +384,7 @@ function MonitoringPage() {
                     />
                   </LineChart>
                 </ResponsiveContainer>
-              ) : liveMode ? (
+              ) : effectiveLiveMode ? (
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart
                     data={liveChartData}
@@ -339,7 +400,7 @@ function MonitoringPage() {
                       tick={{ fill: "#71717a", fontSize: 10, fontFamily: "JetBrains Mono" }}
                       axisLine={{ stroke: "#e4e4e7" }}
                       tickLine={false}
-                      domain={[0, "dataMax + 2"]}
+                      domain={[0, "dataMax + 1"]}
                     />
                     <Tooltip
                       contentStyle={{
@@ -350,9 +411,20 @@ function MonitoringPage() {
                       }}
                       labelStyle={{ color: "#71717a" }}
                     />
+                    <ReferenceLine
+                      y={liveMvThreshold}
+                      stroke="#ef4444"
+                      strokeDasharray="4 4"
+                      label={{
+                        value: `임계값 ${liveMvThreshold.toFixed(2)}`,
+                        fill: "#ef4444",
+                        fontSize: 10,
+                        position: "insideTopRight",
+                      }}
+                    />
                     <Line
                       type="monotone"
-                      dataKey="amp"
+                      dataKey="mv"
                       stroke="#22c55e"
                       strokeWidth={1.5}
                       dot={false}
@@ -363,11 +435,15 @@ function MonitoringPage() {
               ) : (
                 <div className="h-full flex flex-col items-center justify-center gap-2 text-muted">
                   <div className="text-3xl">📡</div>
-                  <div className="text-sm font-semibold">수신기 연결 안 됨</div>
+                  <div className="text-sm font-semibold">
+                    {!showRealData ? "다른 장치 선택됨" : "수신기 연결 안 됨"}
+                  </div>
                   <div className="text-xs font-mono text-center">
-                    {backendUp
-                      ? "로컬 백엔드는 실행 중이지만 수신기(USB)가 감지되지 않습니다. 수신기 연결 후 자동으로 복구됩니다."
-                      : "로컬 백엔드가 실행되고 있지 않습니다. backend 디렉토리에서 main.py를 실행하세요."}
+                    {!showRealData
+                      ? "이 장치는 아직 로컬 백엔드에 연결되지 않았습니다. 위 장치 선택에서 LIVE 표시된 장치를 고르세요."
+                      : backendUp
+                        ? "로컬 백엔드는 실행 중이지만 수신기(USB)가 감지되지 않습니다. 수신기 연결 후 자동으로 복구됩니다."
+                        : "로컬 백엔드가 실행되고 있지 않습니다. backend 디렉토리에서 main.py를 실행하세요."}
                   </div>
                 </div>
               )}

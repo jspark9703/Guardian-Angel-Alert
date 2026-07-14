@@ -12,7 +12,6 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as TrainRouteImport } from './routes/train'
 import { Route as SignupRouteImport } from './routes/signup'
 import { Route as ResidentsRouteImport } from './routes/residents'
-import { Route as OnboardingRouteImport } from './routes/onboarding'
 import { Route as NotificationsRouteImport } from './routes/notifications'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as HistoryRouteImport } from './routes/history'
@@ -36,11 +35,6 @@ const SignupRoute = SignupRouteImport.update({
 const ResidentsRoute = ResidentsRouteImport.update({
   id: '/residents',
   path: '/residents',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const OnboardingRoute = OnboardingRouteImport.update({
-  id: '/onboarding',
-  path: '/onboarding',
   getParentRoute: () => rootRouteImport,
 } as any)
 const NotificationsRoute = NotificationsRouteImport.update({
@@ -99,7 +93,6 @@ export interface FileRoutesByFullPath {
   '/history': typeof HistoryRoute
   '/login': typeof LoginRoute
   '/notifications': typeof NotificationsRoute
-  '/onboarding': typeof OnboardingRoute
   '/residents': typeof ResidentsRoute
   '/signup': typeof SignupRoute
   '/train': typeof TrainRoute
@@ -114,7 +107,6 @@ export interface FileRoutesByTo {
   '/history': typeof HistoryRoute
   '/login': typeof LoginRoute
   '/notifications': typeof NotificationsRoute
-  '/onboarding': typeof OnboardingRoute
   '/residents': typeof ResidentsRoute
   '/signup': typeof SignupRoute
   '/train': typeof TrainRoute
@@ -130,7 +122,6 @@ export interface FileRoutesById {
   '/history': typeof HistoryRoute
   '/login': typeof LoginRoute
   '/notifications': typeof NotificationsRoute
-  '/onboarding': typeof OnboardingRoute
   '/residents': typeof ResidentsRoute
   '/signup': typeof SignupRoute
   '/train': typeof TrainRoute
@@ -147,7 +138,6 @@ export interface FileRouteTypes {
     | '/history'
     | '/login'
     | '/notifications'
-    | '/onboarding'
     | '/residents'
     | '/signup'
     | '/train'
@@ -162,7 +152,6 @@ export interface FileRouteTypes {
     | '/history'
     | '/login'
     | '/notifications'
-    | '/onboarding'
     | '/residents'
     | '/signup'
     | '/train'
@@ -177,7 +166,6 @@ export interface FileRouteTypes {
     | '/history'
     | '/login'
     | '/notifications'
-    | '/onboarding'
     | '/residents'
     | '/signup'
     | '/train'
@@ -193,7 +181,6 @@ export interface RootRouteChildren {
   HistoryRoute: typeof HistoryRoute
   LoginRoute: typeof LoginRoute
   NotificationsRoute: typeof NotificationsRoute
-  OnboardingRoute: typeof OnboardingRoute
   ResidentsRoute: typeof ResidentsRoute
   SignupRoute: typeof SignupRoute
   TrainRoute: typeof TrainRoute
@@ -220,13 +207,6 @@ declare module '@tanstack/react-router' {
       path: '/residents'
       fullPath: '/residents'
       preLoaderRoute: typeof ResidentsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/onboarding': {
-      id: '/onboarding'
-      path: '/onboarding'
-      fullPath: '/onboarding'
-      preLoaderRoute: typeof OnboardingRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/notifications': {
@@ -305,7 +285,6 @@ const rootRouteChildren: RootRouteChildren = {
   HistoryRoute: HistoryRoute,
   LoginRoute: LoginRoute,
   NotificationsRoute: NotificationsRoute,
-  OnboardingRoute: OnboardingRoute,
   ResidentsRoute: ResidentsRoute,
   SignupRoute: SignupRoute,
   TrainRoute: TrainRoute,

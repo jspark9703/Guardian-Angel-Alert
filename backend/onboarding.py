@@ -171,117 +171,126 @@ async def run_calibration(
     calib.agc_duration_s = None
     calib.started_at = time.time()
 
-    if not monitor.running:
-        calib.phase = "error"
-        calib.error = "device not connected"
-        return
-
-    # Phase 0: leave-room wait -- happens before send_line("train") so no
-    # measurement of any kind starts until the installer has had time to leave.
-    calib.phase = "leaving"
-    calib.phase_started_at = time.time()
-    await asyncio.sleep(leave_wait_s)
-    if not monitor.running:
-        calib.phase = "error"
-        calib.error = "device disconnected during calibration"
-        return
-
-    if not monitor.send_line("train"):
-        calib.phase = "error"
-        calib.error = "failed to send train command to device"
-        return
-
-    # Phase A: confirm the command landed by waiting for in-flight frames to
-    # drain and packet flow to actually go quiet (the firmware sends nothing
-    # while training).
-    calib.phase = "waiting_ack"
-    calib.phase_started_at = time.time()
-    phase_start = time.time()
-    last_count = monitor.packet_count
-    last_change_at = phase_start
-    while True:
-        if not monitor.running:
-            calib.phase = "error"
-            calib.error = "device disconnected during calibration"
-            return
-        await asyncio.sleep(poll_interval_s)
-        now = time.time()
-        count = monitor.packet_count
-        if count != last_count:
-            last_count = count
-            last_change_at = now
-        elif now - last_change_at >= silence_confirm_s:
-            break
-        if now - phase_start >= silence_timeout_s:
-            calib.phase = "error"
-            calib.error = "device did not stop streaming after train command (command may not have been received)"
-            return
-
-    # Phase B: wait for the firmware to finish its AGC-settle window and
-    # resume streaming.
-    calib.phase = "waiting_agc"
-    calib.phase_started_at = time.time()
-    phase_start = time.time()
-    baseline_count = monitor.packet_count
-    while True:
-        if not monitor.running:
-            calib.phase = "error"
-            calib.error = "device disconnected during calibration"
-            return
-        await asyncio.sleep(poll_interval_s)
-        if monitor.packet_count > baseline_count:
-            break
-        if time.time() - phase_start >= resume_timeout_s:
-            calib.phase = "error"
-            calib.error = "streaming did not resume after AGC calibration window (timeout)"
-            return
-
-    # How long the AGC-settle window actually took -- an observability signal
-    # (does the timing look sane?), not proof the firmware's AGC calibration
-    # itself succeeded; the firmware has no protocol to report that.
-    calib.agc_duration_s = time.time() - phase_start
-
-    # Phase C: capture the baseline window. Streaming just resumed, so once
-    # baseline_window_s elapses, every sample in the trailing window is
-    # guaranteed post-resume (pre-training samples are older than that).
-    calib.phase = "measuring"
-    calib.phase_started_at = time.time()
-    await asyncio.sleep(baseline_window_s)
-    if not monitor.running:
-        calib.phase = "error"
-        calib.error = "device disconnected during calibration"
-        return
-
-    window = monitor.get_window(baseline_window_s)
-    if window is None:
-        calib.phase = "error"
-        calib.error = "insufficient CSI data captured for baseline"
-        return
-
-    # backend.csi.buffer.RingBuffer.get_window() returns seconds; the ported
-    # signal chain (compute_final_signal / resample_signal) expects microseconds.
-    times_s, amp = window
-    window_us = (times_s * 1e6, amp)
-
-    loop = asyncio.get_event_loop()
     try:
-        presence_mv_threshold, wander_baseline = await loop.run_in_executor(
-            executor,
-            _compute_baseline_thresholds,
-            window_us,
-            cfg,
-            k_mv,
-            mv_floor,
-            wander_baseline_floor,
-        )
-    except Exception as exc:
-        calib.phase = "error"
-        calib.error = f"baseline computation failed: {exc}"
-        return
+        if not monitor.running:
+            calib.phase = "error"
+            calib.error = "device not connected"
+            return
 
-    cfg.presence_mv_threshold = presence_mv_threshold
-    cfg.wander_baseline = wander_baseline
-    calib.presence_mv_threshold = presence_mv_threshold
-    calib.wander_baseline = wander_baseline
-    calib.phase = "done"
-    calib.phase_started_at = time.time()
+        # Phase 0: leave-room wait -- happens before send_line("train") so no
+        # measurement of any kind starts until the installer has had time to leave.
+        calib.phase = "leaving"
+        calib.phase_started_at = time.time()
+        await asyncio.sleep(leave_wait_s)
+        if not monitor.running:
+            calib.phase = "error"
+            calib.error = "device disconnected during calibration"
+            return
+
+        if not monitor.send_line("train"):
+            calib.phase = "error"
+            calib.error = "failed to send train command to device"
+            return
+
+        # Phase A: confirm the command landed by waiting for in-flight frames to
+        # drain and packet flow to actually go quiet (the firmware sends nothing
+        # while training).
+        calib.phase = "waiting_ack"
+        calib.phase_started_at = time.time()
+        phase_start = time.time()
+        last_count = monitor.packet_count
+        last_change_at = phase_start
+        while True:
+            if not monitor.running:
+                calib.phase = "error"
+                calib.error = "device disconnected during calibration"
+                return
+            await asyncio.sleep(poll_interval_s)
+            now = time.time()
+            count = monitor.packet_count
+            if count != last_count:
+                last_count = count
+                last_change_at = now
+            elif now - last_change_at >= silence_confirm_s:
+                break
+            if now - phase_start >= silence_timeout_s:
+                calib.phase = "error"
+                calib.error = "device did not stop streaming after train command (command may not have been received)"
+                return
+
+        # Phase B: wait for the firmware to finish its AGC-settle window and
+        # resume streaming.
+        calib.phase = "waiting_agc"
+        calib.phase_started_at = time.time()
+        phase_start = time.time()
+        baseline_count = monitor.packet_count
+        while True:
+            if not monitor.running:
+                calib.phase = "error"
+                calib.error = "device disconnected during calibration"
+                return
+            await asyncio.sleep(poll_interval_s)
+            if monitor.packet_count > baseline_count:
+                break
+            if time.time() - phase_start >= resume_timeout_s:
+                calib.phase = "error"
+                calib.error = "streaming did not resume after AGC calibration window (timeout)"
+                return
+
+        # How long the AGC-settle window actually took -- an observability signal
+        # (does the timing look sane?), not proof the firmware's AGC calibration
+        # itself succeeded; the firmware has no protocol to report that.
+        calib.agc_duration_s = time.time() - phase_start
+
+        # Phase C: capture the baseline window. Streaming just resumed, so once
+        # baseline_window_s elapses, every sample in the trailing window is
+        # guaranteed post-resume (pre-training samples are older than that).
+        calib.phase = "measuring"
+        calib.phase_started_at = time.time()
+        await asyncio.sleep(baseline_window_s)
+        if not monitor.running:
+            calib.phase = "error"
+            calib.error = "device disconnected during calibration"
+            return
+
+        window = monitor.get_window(baseline_window_s)
+        if window is None:
+            calib.phase = "error"
+            calib.error = "insufficient CSI data captured for baseline"
+            return
+
+        # backend.csi.buffer.RingBuffer.get_window() returns seconds; the ported
+        # signal chain (compute_final_signal / resample_signal) expects microseconds.
+        times_s, amp = window
+        window_us = (times_s * 1e6, amp)
+
+        loop = asyncio.get_event_loop()
+        try:
+            presence_mv_threshold, wander_baseline = await loop.run_in_executor(
+                executor,
+                _compute_baseline_thresholds,
+                window_us,
+                cfg,
+                k_mv,
+                mv_floor,
+                wander_baseline_floor,
+            )
+        except Exception as exc:
+            calib.phase = "error"
+            calib.error = f"baseline computation failed: {exc}"
+            return
+
+        cfg.presence_mv_threshold = presence_mv_threshold
+        cfg.wander_baseline = wander_baseline
+        calib.presence_mv_threshold = presence_mv_threshold
+        calib.wander_baseline = wander_baseline
+        calib.phase = "done"
+        calib.phase_started_at = time.time()
+    except Exception as exc:
+        # Safety net for anything not covered by the explicit checks above --
+        # without this, an unanticipated exception (e.g. a duck-typing mismatch
+        # on `monitor`) leaves calib.phase stuck at a non-terminal value
+        # forever, permanently blocking retries via the phase-not-in
+        # ("idle","done","error") guard on /onboarding/calibrate/start.
+        calib.phase = "error"
+        calib.error = f"calibration failed unexpectedly: {exc}"

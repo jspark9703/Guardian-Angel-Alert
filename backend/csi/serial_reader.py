@@ -1,35 +1,45 @@
 """수신기(csi_recv) 시리얼 연결 관리.
 
-- 포트 자동 탐지 (macOS cu.usbmodem*, 알려진 수신기 시리얼 우선)
+- 포트 자동 탐지 (OS 무관 — pyserial list_ports, 알려진 수신기 시리얼 우선)
 - 921600 baud 연결, 끊김 감지, 1초 간격 자동 재연결
 - 읽은 바이트를 FrameParser 에 넣고, 송신기 MAC 프레임만 RingBuffer 에 적재
 """
 
 from __future__ import annotations
 
-import glob
 import threading
 import time
 
+import numpy as np
 import serial
+from serial.tools import list_ports
 
 from .buffer import RingBuffer
 from .protocol import FrameParser
 
 DEFAULT_BAUD = 921600
 CSI_SEND_MAC = "1a:00:00:00:00:00"  # csi_send 의 스푸핑 MAC (수신기도 필터하지만 이중 방어)
-PORT_PATTERN = "/dev/cu.usbmodem*"
 
 
 def discover_port(preferred_serial: str | None = None) -> str | None:
-    ports = sorted(glob.glob(PORT_PATTERN))
-    if not ports:
+    """macOS(cu.usbmodem*)/Windows(COM*)/Linux(ttyUSB*, ttyACM*) 어디서든 동작하도록
+    pyserial의 list_ports.comports()로 후보를 모으고(main.py의 /ports 엔드포인트와
+    동일한 방식), preferred_serial은 포트 경로가 아니라 하드웨어 시리얼 번호
+    (comports()의 serial_number)로 매칭한다 -- macOS의 cu.usbmodemXXXX 처럼 포트
+    이름 자체에 시리얼 번호가 박혀 있지 않은 OS(Windows의 COM10 등)에서도 특정
+    장치를 지정할 수 있어야 하므로."""
+    candidates = [
+        p
+        for p in list_ports.comports()
+        if "Bluetooth" not in (p.description or "") and "debug" not in (p.description or "")
+    ]
+    if not candidates:
         return None
     if preferred_serial:
-        for p in ports:
-            if preferred_serial in p:
-                return p
-    return ports[0]
+        for p in candidates:
+            if preferred_serial in (p.serial_number or "") or preferred_serial in p.device:
+                return p.device
+    return sorted(candidates, key=lambda p: p.device)[0].device
 
 
 class SerialReader(threading.Thread):
@@ -88,6 +98,10 @@ class SerialReader(threading.Thread):
         """
         return self.parser.frames_ok
 
+    def get_window(self, seconds: float) -> tuple[np.ndarray, np.ndarray] | None:
+        """캘리브레이션 베이스라인 캡처(run_calibration)용 — RingBuffer.get_window()에 위임."""
+        return self.buffer.get_window(seconds)
+
     def send_line(self, text: str) -> bool:
         """열린 시리얼 포트로 명령 문자열을 전송(줄바꿈 추가). 연결 없으면 False.
 
@@ -126,9 +140,6 @@ class SerialReader(threading.Thread):
                         if not data:
                             continue
                         for frame in self.parser.feed(data):
-                            if frame.mac != CSI_SEND_MAC:
-                                self.mac_filtered += 1
-                                continue
                             self.buffer.append(frame)
             except (serial.SerialException, OSError):
                 pass

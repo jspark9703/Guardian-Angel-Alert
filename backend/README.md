@@ -72,17 +72,28 @@ FALL 확정 지점(on_fall 콜백)이다.
 
 ## 움직임(MV) · 재실(Presence) 감지 (온보딩 캘리브레이션)
 
-낙상 DL 추론과 **완전히 독립적으로**, 같은 CSI 스트림에서 병렬로 도는 별도 신호
+낙상 DL 추론과 **완전히 독립적인 스레드**(`presence_loop.py`)에서 도는 별도 신호
 파이프라인이다(`presence/`, `onboarding.py`). reference/fall_detect(구 이동분산
 임계값 기반 백엔드)에서 이식했다 — 자세한 배경은
 `../reference/fall_detect/migration.md`, `../reference/fall_detect/occupation_pipline.md` 참고.
 
+**`detector.py`(낙상 DL)와는 별도 스레드**로 `main.py`가 조건 없이 항상 기동한다
+(`start_presence_loop()`) — `--no-model`이거나 체크포인트 로드에 실패해 `detector`가
+아예 없어도, 시리얼 수신기가 CSI를 흘려보내는 한 이 루프는 계속 돈다. 처음
+구현에서는 이 계산을 `FallDetector` 안에 얹어 두어서 `--no-model`일 때 재실/움직임
+감지 전체가 죽는 결함이 있었다 — 지금은 분리되어 있다.
+
 ```
-매 0.25초 틱 (detector.py, DL 추론과 같은 스레드에서 순차 실행되지만 계산은 별개):
+매 0.25초 틱 (presence_loop.py, 독립 스레드):
   MV 신호   : ring.get_window(3s)  -> compute_final_signal(...) -> mv_current
   Wander 신호: ring.get_window(6s) -> compute_final_signal(..., compute_band_energy=True) -> wander_current
   PresenceDetector.update(mv_current, wander_current) -> presence_state(PRESENT/ABSENT)
 ```
+
+`/ws/live`는 `presence_loop`가 있으면(항상 있음) 그 페이로드를 먼저 병합하고, 그 위에
+`detector`가 있으면(모델 로드 성공 시에만) 낙상 판정 필드를 덧붙인다 — 즉 `mv_current`/
+`presence_state`는 모델 유무와 무관하게 항상 내려오고, `proba_fall`/`detect_state`만
+모델이 있을 때 추가된다. `/monitor/status`의 `presence` 키로도 동일 상태를 폴링할 수 있다.
 
 - `presence_mv_threshold`(이동분산 임계값)와 `wander_baseline`(조용한 방의 Welch PSD
   에너지 기준값)은 `POST /onboarding/calibrate/start`가 구동하는 캘리브레이션으로
@@ -123,8 +134,9 @@ FALL 확정 지점(on_fall 콜백)이다.
 
 ```
 backend/
-  main.py                FastAPI 앱, 엔드포인트, 탐지 루프와 알림 기동
-  detector.py            0.25초 주기 추론 루프, 상태머신, 인과 다수결, 재실 감지 병렬 계산
+  main.py                FastAPI 앱, 엔드포인트, 탐지/재실 루프와 알림 기동
+  detector.py            0.25초 주기 낙상 추론 루프, 상태머신, 인과 다수결 (DL 전용)
+  presence_loop.py       움직임(MV)/재실 감지 독립 루프 (DL 모델과 무관, 항상 기동)
   notifier.py            ntfy 푸시 알림 발송 (전용 스레드, 재시도)
   onboarding.py          온보딩 3단계 캘리브레이션 오케스트레이션 (움직임/재실 baseline 도출)
   csi/protocol.py        바이너리 프레임 파서 (매직 0xA55A, 체크섬, 재동기화)

@@ -4,7 +4,7 @@
 
 import { useEffect, useRef } from "react";
 import { useLiveStream } from "@/lib/backend";
-import { applyBackendDetection, useCurrentUser } from "@/lib/mock-store";
+import { applyBackendDetection, setBackendConnected, useCurrentUser } from "@/lib/mock-store";
 
 export function BackendDetectionBridge() {
   const user = useCurrentUser();
@@ -13,13 +13,14 @@ export function BackendDetectionBridge() {
 }
 
 function HomeBridge() {
-  const live = useLiveStream(2);
+  const live = useLiveStream();
   // 마운트 직후 WS가 붙기 전에 "연결 끊김"으로 오판하지 않도록 잠깐 유예
   const mountedAt = useRef(Date.now());
 
   useEffect(() => {
     const sample = live.last;
     const connected = live.wsUp && (sample?.connected ?? false);
+    setBackendConnected(connected);
     if (!connected && Date.now() - mountedAt.current < 3000) return;
     applyBackendDetection({
       connected,

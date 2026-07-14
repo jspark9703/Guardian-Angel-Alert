@@ -1,7 +1,7 @@
 // 로컬 백엔드(backend/main.py, 127.0.0.1:8000) API 클라이언트.
 // 대시보드와 같은 맥에서 돌아가는 FastAPI 서버로, 수신기 시리얼 스트림을 중계한다.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 export const BACKEND_URL = "http://127.0.0.1:8000";
 
@@ -17,6 +17,35 @@ export async function fetchPorts(): Promise<DetectedPort[]> {
   if (!res.ok) throw new Error(`ports ${res.status}`);
   const data = (await res.json()) as { ports: DetectedPort[] };
   return data.ports;
+}
+
+export interface MonitorStartPayload {
+  port?: string;
+  baud?: number;
+  preferred_serial?: string;
+}
+
+export async function startMonitor(payload: MonitorStartPayload = {}): Promise<{ status: string; port: string | null; connected: boolean }> {
+  const res = await fetch(`${BACKEND_URL}/monitor/start`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(5000),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ detail: `monitor/start ${res.status}` }));
+    throw new Error(body.detail ?? `monitor/start ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function stopMonitor(): Promise<{ status: string }> {
+  const res = await fetch(`${BACKEND_URL}/monitor/stop`, {
+    method: "POST",
+    signal: AbortSignal.timeout(5000),
+  });
+  if (!res.ok) throw new Error(`monitor/stop ${res.status}`);
+  return res.json();
 }
 
 // 로컬 백엔드 프로세스 자체가 떠 있는지(수신기 연결 여부와 무관) — 온보딩/장치 재설정
@@ -95,10 +124,12 @@ export interface CalibrationStatus {
   error: string | null;
 }
 
-export async function startCalibration(): Promise<{ status: string }> {
+export async function startCalibration(payload: MonitorStartPayload = {}): Promise<{ status: string }> {
   const res = await fetch(`${BACKEND_URL}/onboarding/calibrate/start`, {
     method: "POST",
-    signal: AbortSignal.timeout(2000),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(5000),
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({ detail: `calibrate/start ${res.status}` }));
@@ -151,15 +182,15 @@ export interface BackendCalibrationState {
 // active=true가 되는 순간 캘리브레이션을 1회 시작하고 useCalibrationStatusPoll로 상태를
 // 계속 폴링한다. mock startDeviceReset()과 나란히 쓰이는 실백엔드 경로 — 온보딩
 // 위저드처럼 "이 화면에 들어오면 곧바로 캘리브레이션을 시작"하는 1회성 흐름에 쓴다.
-export function useBackendCalibration(active: boolean): BackendCalibrationState {
+export function useBackendCalibration(active: boolean, payload?: MonitorStartPayload): BackendCalibrationState {
   const [startError, setStartError] = useState<string | null>(null);
   const startedRef = useRef(false);
 
   useEffect(() => {
     if (!active || startedRef.current) return;
     startedRef.current = true;
-    startCalibration().catch((e) => setStartError(e instanceof Error ? e.message : String(e)));
-  }, [active]);
+    startCalibration(payload).catch((e) => setStartError(e instanceof Error ? e.message : String(e)));
+  }, [active, payload]);
 
   const status = useCalibrationStatusPoll(active);
 
@@ -172,45 +203,179 @@ export interface LiveStreamState {
   history: LiveSample[];
 }
 
-export function useLiveStream(maxHistory = 300): LiveStreamState {
-  const [state, setState] = useState<LiveStreamState>({ wsUp: false, last: null, history: [] });
+// 모든 useLiveStream() 호출자가 이 하나의 WS 연결을 공유하는 모듈 싱글톤.
+// 예전에는 컴포넌트마다(BackendDetectionBridge, index.tsx) 각자 별도의 /ws/live
+// 연결을 열었다 — 실시간 감지 자체(백엔드의 presence_loop/detector)는 브라우저
+// 연결과 무관하게 항상 계속 돌지만, 프론트가 페이지마다 별도 연결을 열고 닫다 보니
+// "실시간 관제 페이지에 들어올 때만 연결되는 것처럼" 관찰되는 문제가 있었다.
+// 하나의 연결로 통합하면 첫 구독자(로그인 즉시 마운트되는 BackendDetectionBridge)가
+// 붙는 순간부터 마지막 구독자가 사라질 때까지 — 즉 로그인해 있는 한 어느 페이지에
+// 있든 — 계속 연결이 유지된다.
+const SHARED_HISTORY_MAX = 300;
+let sharedState: LiveStreamState = { wsUp: false, last: null, history: [] };
+let sharedWs: WebSocket | null = null;
+let sharedRetryTimer: ReturnType<typeof setTimeout> | null = null;
+const sharedListeners = new Set<() => void>();
+
+function notifyShared() {
+  sharedListeners.forEach((cb) => cb());
+}
+
+function connectShared() {
+  if (sharedWs) return;
+  try {
+    sharedWs = new WebSocket(`${BACKEND_URL.replace(/^http/, "ws")}/ws/live`);
+  } catch {
+    sharedRetryTimer = setTimeout(connectShared, 2000);
+    return;
+  }
+  sharedWs.onopen = () => {
+    sharedState = { ...sharedState, wsUp: true };
+    notifyShared();
+  };
+  sharedWs.onmessage = (e) => {
+    const sample = JSON.parse(e.data as string) as LiveSample;
+    sharedState = {
+      wsUp: true,
+      last: sample,
+      history: [...sharedState.history.slice(-(SHARED_HISTORY_MAX - 1)), sample],
+    };
+    notifyShared();
+  };
+  sharedWs.onclose = () => {
+    sharedWs = null;
+    sharedState = { ...sharedState, wsUp: false };
+    notifyShared();
+    // 구독자가 아직 남아 있으면(즉 여전히 로그인 상태면) 계속 재연결 시도
+    if (sharedListeners.size > 0) sharedRetryTimer = setTimeout(connectShared, 2000);
+  };
+  sharedWs.onerror = () => sharedWs?.close();
+}
+
+function subscribeShared(callback: () => void): () => void {
+  sharedListeners.add(callback);
+  if (!sharedWs && !sharedRetryTimer) connectShared();
+  return () => {
+    sharedListeners.delete(callback);
+    if (sharedListeners.size === 0) {
+      if (sharedRetryTimer) {
+        clearTimeout(sharedRetryTimer);
+        sharedRetryTimer = null;
+      }
+      sharedWs?.close();
+      sharedWs = null;
+    }
+  };
+}
+
+function getSharedSnapshot(): LiveStreamState {
+  return sharedState;
+}
+
+export function useLiveStream(): LiveStreamState {
+  return useSyncExternalStore(subscribeShared, getSharedSnapshot, getSharedSnapshot);
+}
+
+// ---- 진단(Diagnostics) — /monitor/status ----
+// 연결/캘리브레이션/스트림 상태를 한 번에 보여주기 위한 폴링 API. 백엔드가 이미
+// 계산해 두는 값이지만 지금까지 프론트가 이 엔드포인트를 호출한 적이 없었다 —
+// "지금 연결/캘리브레이션/스트림이 되고 있는지 모니터링할 수 없다"는 문제의 직접
+// 원인이었다.
+
+export interface SerialStatus {
+  connected: boolean;
+  port: string | null;
+  baud: number;
+  reconnects: number;
+  frames_ok: number;
+  checksum_errors: number;
+  resyncs: number;
+  mac_filtered: number;
+}
+
+export interface BufferStats {
+  buffered_frames: number;
+  buffered_seconds: number;
+  hz_1s: number;
+  hz_5s: number;
+  last_rssi: number | null;
+  last_agc_gain: number | null;
+  subcarriers: number | null;
+  total_frames: number;
+}
+
+export interface DetectStatus {
+  enabled: boolean;
+  reason?: string | null;
+  device?: string;
+  threshold?: number;
+  state?: DetectState;
+  fall_count?: number;
+  last_fall_time?: number | null;
+  inference_count?: number;
+  skip_count?: number;
+  latency_ema_ms?: number | null;
+  last_error?: string | null;
+}
+
+export interface PresenceLoopStatus {
+  enabled: boolean;
+  tick_count?: number;
+  skip_count?: number;
+  last_error?: string | null;
+  presence_state?: PresenceState | null;
+  mv_current?: number | null;
+  presence_mv_threshold?: number | null;
+  wander_current?: number | null;
+  wander_baseline?: number | null;
+}
+
+export interface NotifyStatus {
+  enabled: boolean;
+  reason?: string;
+  topic?: string;
+  sent_count?: number;
+  failed_count?: number;
+  last_error?: string | null;
+}
+
+export interface MonitorStatus {
+  serial: SerialStatus | null;
+  buffer: BufferStats;
+  detect: DetectStatus;
+  presence: PresenceLoopStatus;
+  notify: NotifyStatus;
+  server_time: number;
+}
+
+export async function fetchMonitorStatus(): Promise<MonitorStatus> {
+  const res = await fetch(`${BACKEND_URL}/monitor/status`, { signal: AbortSignal.timeout(2000) });
+  if (!res.ok) throw new Error(`monitor/status ${res.status}`);
+  return res.json();
+}
+
+// 1초 주기 — "지금 실제로 프레임이 들어오고 있는가"를 실기기 테스트 중 거의
+// 실시간에 가깝게 확인할 수 있도록 캘리브레이션 상태 폴링과 동일한 주기를 쓴다.
+export function useMonitorStatus(intervalMs = 1000): MonitorStatus | null {
+  const [status, setStatus] = useState<MonitorStatus | null>(null);
 
   useEffect(() => {
-    let ws: WebSocket | null = null;
-    let retry: ReturnType<typeof setTimeout> | null = null;
-    let closed = false;
-
-    const connect = () => {
-      if (closed) return;
+    let cancelled = false;
+    const poll = async () => {
       try {
-        ws = new WebSocket(`${BACKEND_URL.replace(/^http/, "ws")}/ws/live`);
+        const s = await fetchMonitorStatus();
+        if (!cancelled) setStatus(s);
       } catch {
-        retry = setTimeout(connect, 2000);
-        return;
+        // 폴링 실패는 무시 — 다음 tick에 재시도
       }
-      ws.onopen = () => setState((s) => ({ ...s, wsUp: true }));
-      ws.onmessage = (e) => {
-        const sample = JSON.parse(e.data as string) as LiveSample;
-        setState((s) => ({
-          wsUp: true,
-          last: sample,
-          history: [...s.history.slice(-(maxHistory - 1)), sample],
-        }));
-      };
-      ws.onclose = () => {
-        setState((s) => ({ ...s, wsUp: false }));
-        if (!closed) retry = setTimeout(connect, 2000);
-      };
-      ws.onerror = () => ws?.close();
     };
-
-    connect();
+    poll();
+    const id = setInterval(poll, intervalMs);
     return () => {
-      closed = true;
-      if (retry) clearTimeout(retry);
-      ws?.close();
+      cancelled = true;
+      clearInterval(id);
     };
-  }, [maxHistory]);
+  }, [intervalMs]);
 
-  return state;
+  return status;
 }

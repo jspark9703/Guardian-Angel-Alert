@@ -168,7 +168,8 @@ export interface EventLogEntry {
 }
 
 interface Store {
-  running: boolean;
+  running: boolean; // mock 시뮬레이션 on/off (FACILITY 전용 — HOME 실장치와는 무관)
+  backendConnected: boolean; // 실백엔드(WS+시리얼) 연결 여부 — BackendDetectionBridge가 갱신
   port: string;
   mqttBroker: string;
   serialBaud: number;
@@ -206,36 +207,9 @@ const seedDevices: Device[] = [
   // 같은 호실의 화장실/샤워실 등 서브 공간 장치 (다중 매핑 시연용)
   mkDevice("d6b", "204호 샤워실", "204", "csi/gn/204/shower", "AA:BB:CC:00:03:0A", facility1.id),
   mkDevice("d1b", "302호 화장실", "302", "csi/gn/302/bath", "AA:BB:CC:00:01:13", facility1.id),
-  // HOME 데모 계정(u-home)의 가정 내 장치들
-  mkDeviceHome(
-    "dh1",
-    "거실 장치",
-    "거실",
-    "csi/home/user/livingroom",
-    "AA:BB:CC:10:00:01",
-    "u-home",
-  ),
-  mkDeviceHome("dh2", "침실 장치", "침실", "csi/home/user/bedroom", "AA:BB:CC:10:00:02", "u-home"),
-  mkDeviceHome(
-    "dh3",
-    "화장실 장치",
-    "화장실",
-    "csi/home/user/bathroom",
-    "AA:BB:CC:10:00:03",
-    "u-home",
-  ),
+  // HOME 데모 계정(u-home)은 예시 장치를 두지 않는다 — 실사용자 플로우(재실 대상
+  // 등록 → 장치 등록 → 캘리브레이션)를 온보딩에서 직접 밟도록 빈 상태로 시작한다.
 ];
-
-function mkDeviceHome(
-  id: string,
-  name: string,
-  room: string,
-  topic: string,
-  mac: string,
-  ownerUserId: string,
-): Device {
-  return mkDevice(id, name, room, topic, mac, undefined, ownerUserId);
-}
 
 function mkDevice(
   id: string,
@@ -366,23 +340,8 @@ const seedResidents: Resident[] = [
     online: true,
     ...P,
   },
-
-  // HOME 데모: u-home 소유. 거실+침실 두 대의 장치를 함께 매핑.
-  {
-    id: "rh1",
-    name: "이복순",
-    room: "화장실",
-    age: 82,
-    caregiver: "이가정 (아들)",
-    deviceId: "dh2",
-    deviceIds: ["dh2", "dh3"],
-    ownerUserId: "u-home",
-    state: "IDLE",
-    mv: 0.3,
-    confidence: 0.08,
-    online: true,
-    ...P,
-  },
+  // HOME 데모 계정(u-home)은 예시 거주자를 두지 않는다 — 온보딩의 재실 대상 등록
+  // 단계에서 사용자가 직접 만든다.
 ];
 
 const seedUsers: UserAccount[] = [
@@ -413,6 +372,9 @@ const seedUsers: UserAccount[] = [
     name: "이가정",
     service: "HOME",
     role: "USER",
+    // 예시 장치/거주자는 없이 시작 — 로그인하면 바로 대시보드로 가고, 사이드바
+    // Management의 "재실 대상 관리"(/residents)·"장치 설정"(/devices)에서 사용자가
+    // 직접 등록을 진행한다(더 이상 온보딩 위저드로 강제 이동하지 않음).
     onboarded: true,
   },
 ];
@@ -446,6 +408,7 @@ function saveSession(s: Session | null) {
 
 let state: Store = {
   running: false,
+  backendConnected: false,
   port: "COM4",
   mqttBroker: "mqtt://broker.csi-guard.io:1883",
   serialBaud: 921600,
@@ -467,16 +430,6 @@ let state: Store = {
       confidence: 0.94,
       duration: 1.12,
       response: "PENDING",
-    },
-    {
-      id: "f-seed-home",
-      residentId: "rh1",
-      residentName: "이복순",
-      room: "화장실",
-      timestamp: Date.now() - 1000 * 60 * 60 * 3,
-      confidence: 0.88,
-      duration: 0.86,
-      response: "ACKNOWLEDGED",
     },
   ],
   recipients: [
@@ -574,6 +527,17 @@ export function useCurrentFacility(): Facility | null {
   const u = useCurrentUser();
   return useStore((s) =>
     u?.facilityId ? (s.facilities.find((f) => f.id === u.facilityId) ?? null) : null,
+  );
+}
+
+// HOME 사용자의 "대표 거주자"가 매핑한 주 장치 id — 실백엔드(로컬 backend)가 실제로
+// 연동되는 그 장치를 가리킨다(applyBackendDetection과 동일한 선택 규칙:
+// ownerUserId가 일치하는 첫 거주자). devices.tsx/index.tsx가 "이 장치가 실장치인가"
+// 판정에 공용으로 쓴다.
+export function useHomePrimaryDeviceId(): string | undefined {
+  const u = useCurrentUser();
+  return useStore((s) =>
+    u ? s.residents.find((r) => r.ownerUserId === u.id)?.deviceId : undefined,
   );
 }
 
@@ -678,6 +642,13 @@ export function stopMonitor() {
   if (!state.running) return;
   set({ running: false });
   addLog("INFO", "모니터링 중지");
+}
+
+// BackendDetectionBridge가 실백엔드(WS+시리얼) 연결 상태가 바뀔 때마다 호출한다.
+// AppSidebar 등 여러 컴포넌트가 새 WS 연결을 열지 않고도 이 값을 읽을 수 있게 한다.
+export function setBackendConnected(connected: boolean) {
+  if (state.backendConnected === connected) return;
+  set({ backendConnected: connected });
 }
 export function setPort(port: string) {
   set({ port });

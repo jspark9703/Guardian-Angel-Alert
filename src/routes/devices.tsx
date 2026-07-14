@@ -16,13 +16,16 @@ import {
   type Device,
   type CalibrationStage,
 } from "@/lib/mock-store";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   fetchPorts,
   startCalibration,
+  startMonitor as startBackendMonitor,
+  stopMonitor as stopBackendMonitor,
   useBackendUp,
   useCalibrationStatusPoll,
+  useMonitorStatus,
   type DetectedPort,
 } from "@/lib/backend";
 
@@ -77,13 +80,12 @@ function DevicesPage() {
   const selected = devices.find((d) => d.id === selectedId) ?? devices[0];
 
   const backendUp = useBackendUp();
-  const residents = useStore((s) => s.residents);
-  // 실백엔드는 HOME 사용자의 대표 거주자가 매핑한 주 장치 1대에만 연결된다(현재
-  // HOME 실장치 연동 범위 — docs/작업명세_로컬_실시간_낙상감지_v1.0.md 참고).
-  const primaryDeviceId = !isFacility
-    ? residents.find((r) => r.ownerUserId === user?.id)?.deviceId
-    : undefined;
-  const isRealDevice = (d?: Device) => !isFacility && backendUp && !!d && d.id === primaryDeviceId;
+  const port = useStore((s) => s.port);
+  const baud = useStore((s) => s.serialBaud);
+  // 실백엔드는 HOME 계정당 시리얼 연결이 하나뿐이므로, 어떤 장치 행이든
+  // HOME + 백엔드 연결 상태면 실캘리브레이션 대상이 된다 — 거주자-장치 매핑
+  // 여부와는 무관(매핑은 재실 대상 관리 화면의 별개 책임).
+  const isRealDevice = (d?: Device) => !isFacility && backendUp && !!d;
 
   return (
     <div>
@@ -107,6 +109,7 @@ function DevicesPage() {
         </div>
 
         <ConnectionPanel />
+        {!isFacility && backendUp && <DiagnosticsPanel />}
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <div className="lg:col-span-2 bg-surface border border-border rounded-lg overflow-hidden">
@@ -229,7 +232,7 @@ function DevicesPage() {
             onCancel={() => setResetConfirm(null)}
             onConfirm={() => {
               if (isRealDevice(resetConfirm)) {
-                startCalibration().catch((e) =>
+                startCalibration({ port: port || undefined, baud }).catch((e) =>
                   toast.error(
                     `캘리브레이션 시작 실패: ${e instanceof Error ? e.message : String(e)}`,
                   ),
@@ -390,6 +393,7 @@ function AddDeviceButton({
     if (!name || !room) return;
     if (connectionType === "SERIAL" && !serialPortInput) return;
     const id = `d-${Date.now()}`;
+    const useReal = !isFacility && backendUp === true;
     const topicSlug = isFacility ? room : romanize(room);
     const dev: Device = {
       id,
@@ -415,8 +419,11 @@ function AddDeviceButton({
       current_rssi: -60,
       agc: 25,
       noise_floor: -92,
-      calibrating: false,
-      calibrationStage: "IDLE",
+      // CalibratingPanel은 calibrating이 true여야 렌더되어 실백엔드 폴링을
+      // 시작한다 — mock 경로는 startDeviceReset이 곧바로 덮어쓰지만, 실백엔드
+      // 경로는 이 값이 아니면 캘리브레이션이 조용히(화면 갱신 없이) 진행된다.
+      calibrating: true,
+      calibrationStage: useReal ? "LEAVING" : "IDLE",
       calibrationProgress: 0,
       presence_mv_threshold: 1.8,
       wander_baseline: 0.5,
@@ -426,8 +433,15 @@ function AddDeviceButton({
       ownerUserId: ownerId,
     };
     upsertDevice(dev);
-    // 장치 추가 시 자동으로 캘리브레이션 시작 (4단계, 총 약 31초)
-    startDeviceReset(id);
+    // 장치 추가 시 자동으로 캘리브레이션 시작 (4단계, 총 약 31초) — HOME +
+    // 실백엔드 연결 시엔 실캘리브레이션 API를, 그 외엔 mock 타이머를 사용한다.
+    if (useReal) {
+      startCalibration({ port: serialPortInput || undefined, baud: 921600 }).catch((e) =>
+        toast.error(`캘리브레이션 시작 실패: ${e instanceof Error ? e.message : String(e)}`),
+      );
+    } else {
+      startDeviceReset(id);
+    }
     toast.success(
       `${name} 추가됨 · 캘리브레이션 시작 (공간 비우기 → 응답 대기 → AGC 보정 → baseline 측정)`,
     );
@@ -570,23 +584,244 @@ function romanize(korean: string): string {
   return map[korean] ?? "misc";
 }
 
+// tick_count 같은 누적 카운터가 일정 시간(2초) 동안 값이 바뀌지 않으면 "루프가
+// 멎었다"고 판단한다 — presence_loop는 0.25초마다 tick하므로 2초면 8회는
+// 늘어나야 정상이다.
+function useStalledCounter(value: number | undefined, enabled: boolean | undefined): boolean {
+  const prevRef = useRef<{ value: number; at: number } | null>(null);
+  const [stalled, setStalled] = useState(false);
+  useEffect(() => {
+    if (!enabled || value == null) {
+      setStalled(false);
+      prevRef.current = null;
+      return;
+    }
+    const prev = prevRef.current;
+    if (prev && prev.value === value) {
+      if (Date.now() - prev.at > 2000) setStalled(true);
+    } else {
+      prevRef.current = { value, at: Date.now() };
+      setStalled(false);
+    }
+  }, [value, enabled]);
+  return stalled;
+}
+
+// 연결/캘리브레이션/스트림 여부를 한 화면에서 확인하기 위한 진단 패널. 백엔드가
+// 이미 계산해 두는 /monitor/status 값을 그대로 보여줄 뿐 — 백엔드 로직은 건드리지
+// 않는다. HOME + 로컬 백엔드 연결 시에만 표시(FACILITY는 실백엔드가 없음).
+function DiagnosticsPanel() {
+  const status = useMonitorStatus(1000);
+  const presenceStalled = useStalledCounter(status?.presence.tick_count, status?.presence.enabled);
+
+  if (!status) {
+    return (
+      <div className="bg-surface border border-border rounded-lg p-5">
+        <SectionTitle>진단 · Diagnostics</SectionTitle>
+        <p className="text-xs text-muted">백엔드 응답 대기 중…</p>
+      </div>
+    );
+  }
+
+  const { serial, buffer, presence, detect, notify } = status;
+  const streaming = buffer.hz_1s > 0;
+  const macTotal = (serial?.frames_ok ?? 0) + (serial?.mac_filtered ?? 0);
+  const macRatio = macTotal > 0 ? (serial?.mac_filtered ?? 0) / macTotal : 0;
+
+  return (
+    <div className="bg-surface border border-border rounded-lg p-5 space-y-4">
+      <div className="flex items-center justify-between">
+        <SectionTitle>진단 · Diagnostics (연결 / 캘리브레이션 / 스트림)</SectionTitle>
+        <span
+          className={`text-[10px] font-mono uppercase px-2 py-0.5 rounded border ${
+            streaming
+              ? "text-success border-success/30 bg-success/10"
+              : "text-primary border-primary/30 bg-primary/10"
+          }`}
+        >
+          {streaming ? `● 스트림 수신 중 · ${buffer.hz_1s}Hz` : "○ 프레임 없음 · 스트림 정지"}
+        </span>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <DiagGroup title="시리얼">
+          <DiagRow
+            label="연결"
+            value={serial?.connected ? `● ${serial.port ?? "-"}` : "○ 미연결"}
+            tone={serial?.connected ? "success" : "danger"}
+          />
+          <DiagRow label="Baud" value={String(serial?.baud ?? "-")} />
+          <DiagRow label="재연결 횟수" value={String(serial?.reconnects ?? 0)} />
+          <DiagRow label="파싱 성공 프레임" value={String(serial?.frames_ok ?? 0)} />
+          <DiagRow
+            label="체크섬 오류"
+            value={String(serial?.checksum_errors ?? 0)}
+            tone={(serial?.checksum_errors ?? 0) > 0 ? "warn" : undefined}
+          />
+          <DiagRow
+            label="재동기화"
+            value={String(serial?.resyncs ?? 0)}
+            tone={(serial?.resyncs ?? 0) > 0 ? "warn" : undefined}
+          />
+          <DiagRow
+            label="MAC 필터링됨"
+            value={String(serial?.mac_filtered ?? 0)}
+            tone={macRatio > 0.5 ? "danger" : macRatio > 0 ? "warn" : undefined}
+            hint={
+              macRatio > 0.5
+                ? "프레임 대부분이 MAC 필터에 걸리고 있습니다 — 송신기 MAC이 예상(1a:00:00:00:00:00)과 다를 수 있습니다"
+                : undefined
+            }
+          />
+        </DiagGroup>
+
+        <DiagGroup title="버퍼 · 스트림 수신">
+          <DiagRow
+            label="현재 Hz (1초)"
+            value={String(buffer.hz_1s)}
+            tone={streaming ? "success" : "danger"}
+            hint={!streaming ? "0이면 지금 프레임이 전혀 들어오지 않고 있다는 뜻입니다" : undefined}
+          />
+          <DiagRow label="평균 Hz (5초)" value={String(buffer.hz_5s)} />
+          <DiagRow label="버퍼 길이" value={`${buffer.buffered_seconds}s`} />
+          <DiagRow label="누적 프레임" value={String(buffer.total_frames)} />
+        </DiagGroup>
+
+        <DiagGroup title="재실 루프 · 움직임/Wander (DL 모델과 무관)">
+          <DiagRow
+            label="상태"
+            value={presence.enabled ? "● 동작 중" : "○ 비활성"}
+            tone={presence.enabled ? "success" : "danger"}
+          />
+          <DiagRow
+            label="tick 횟수"
+            value={String(presence.tick_count ?? 0)}
+            tone={presenceStalled ? "danger" : undefined}
+            hint={
+              presenceStalled ? "값이 멈춰 있습니다 — 재실 루프가 멎었을 수 있습니다" : undefined
+            }
+          />
+          <DiagRow label="skip 횟수" value={String(presence.skip_count ?? 0)} />
+          {presence.last_error && (
+            <DiagRow label="마지막 오류" value={presence.last_error} tone="danger" />
+          )}
+        </DiagGroup>
+
+        <DiagGroup title="낙상 모델 (DL)">
+          <DiagRow
+            label="상태"
+            value={detect.enabled ? "● 가동 중" : "○ 비활성"}
+            tone={detect.enabled ? "success" : "warn"}
+          />
+          {!detect.enabled && detect.reason && (
+            <DiagRow label="비활성 사유" value={detect.reason} />
+          )}
+          {detect.enabled && (
+            <>
+              <DiagRow label="추론 횟수" value={String(detect.inference_count ?? 0)} />
+              <DiagRow label="skip 횟수" value={String(detect.skip_count ?? 0)} />
+              {detect.last_error && (
+                <DiagRow label="마지막 오류" value={detect.last_error} tone="danger" />
+              )}
+            </>
+          )}
+        </DiagGroup>
+      </div>
+
+      <div className="text-[10px] font-mono text-muted">
+        알림(ntfy):{" "}
+        {notify.enabled
+          ? `활성 · topic=${notify.topic}`
+          : `비활성${notify.reason ? ` · ${notify.reason}` : ""}`}
+      </div>
+    </div>
+  );
+}
+
+function DiagGroup({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="border border-border rounded p-3 space-y-1.5">
+      <div className="text-[10px] font-mono uppercase text-muted tracking-wider mb-1">{title}</div>
+      {children}
+    </div>
+  );
+}
+
+function DiagRow({
+  label,
+  value,
+  tone,
+  hint,
+}: {
+  label: string;
+  value: string;
+  tone?: "success" | "warn" | "danger";
+  hint?: string;
+}) {
+  const cls =
+    tone === "success"
+      ? "text-success"
+      : tone === "warn"
+        ? "text-warning"
+        : tone === "danger"
+          ? "text-primary"
+          : "text-foreground";
+  return (
+    <div>
+      <div className="flex justify-between font-mono text-xs">
+        <span className="text-muted">{label}</span>
+        <span className={cls}>{value}</span>
+      </div>
+      {hint && (
+        <div className="text-[9px] text-primary/80 font-mono mt-0.5 leading-relaxed">{hint}</div>
+      )}
+    </div>
+  );
+}
+
 function ConnectionPanel() {
   const running = useStore((s) => s.running);
   const port = useStore((s) => s.port);
   const broker = useStore((s) => s.mqttBroker);
   const baud = useStore((s) => s.serialBaud);
+  const backendConnected = useStore((s) => s.backendConnected);
+  const [busy, setBusy] = useState(false);
   const user = useCurrentUser();
   const isFacility = user?.service === "FACILITY";
   const { ports, backendUp, refresh } = useDetectedPorts();
+  // HOME + 로컬 백엔드 연결 시: 파이프라인은 backend/main.py 프로세스가 독립적으로
+  // 돌리지만, 어떤 포트에 연결할지는 이 화면에서 실제로 제어한다(아래 연결/해제
+  // 버튼) — backendConnected는 BackendDetectionBridge가 공유 /ws/live 소켓으로
+  // 이미 실시간으로 갱신해 두는 값이라 별도 폴링 없이 그대로 읽는다.
+  const isRealHome = !isFacility && backendUp === true;
+  const connectionBusy = isRealHome ? backendConnected || busy : running;
+
+  const handleRealToggle = async () => {
+    setBusy(true);
+    try {
+      if (backendConnected) {
+        await stopBackendMonitor();
+        toast.success("실장치 연결 해제됨");
+      } else {
+        await startBackendMonitor({ port: port || undefined, baud });
+        toast.success("연결 요청 완료 · 아래 진단 패널에서 상태를 확인하세요");
+      }
+    } catch (e) {
+      toast.error(`연결 제어 실패: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   // 백엔드가 탐지한 포트 목록이 오면, 현재 설정된 포트가 목록에 없을 때 자동 보정
+  // (연결 중/진행 중일 때는 선택을 덮어쓰지 않도록 connectionBusy로 가드)
   useEffect(() => {
-    if (!backendUp || ports.length === 0 || running) return;
+    if (!backendUp || ports.length === 0 || connectionBusy) return;
     if (!ports.some((p) => p.device === port)) {
       const preferred = ports.find((p) => p.active) ?? ports[0];
       setPort(preferred.device);
     }
-  }, [backendUp, ports, port, running]);
+  }, [backendUp, ports, port, connectionBusy]);
 
   return (
     <div className="bg-surface border border-border rounded-lg p-5 space-y-4">
@@ -594,23 +829,46 @@ function ConnectionPanel() {
         <div>
           <SectionTitle>통신 설정 · Connection</SectionTitle>
           <p className="text-xs text-muted">
-            ESP32 수신기 시리얼 포트를 설정하고 파이프라인을 제어합니다. MQTT는 비활성화 상태입니다.
+            {isRealHome
+              ? "포트/Baud를 선택한 뒤 연결 버튼으로 backend/main.py의 시리얼 연결을 직접 제어합니다. 연결 중에는 포트/Baud를 변경할 수 없습니다."
+              : "ESP32 수신기 시리얼 포트를 설정하고 파이프라인을 제어합니다. MQTT는 비활성화 상태입니다."}
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <span
-            className={`text-[10px] font-mono uppercase ${running ? "text-success" : "text-muted"}`}
-          >
-            {running ? "● Pipeline Running" : "○ Idle"}
-          </span>
-          <button
-            onClick={() => (running ? stopMonitor() : startMonitor())}
-            className={`px-4 py-2 rounded font-mono text-xs font-bold uppercase tracking-widest ${
-              running ? "bg-primary text-primary-foreground" : "bg-success text-white"
-            } hover:brightness-110`}
-          >
-            {running ? "■ Stop" : "▶ Start"}
-          </button>
+          {isRealHome ? (
+            <>
+              <span
+                className={`text-[10px] font-mono uppercase ${backendConnected ? "text-success" : "text-muted"}`}
+              >
+                {backendConnected ? "● Connected" : "○ Disconnected"}
+              </span>
+              <button
+                onClick={() => void handleRealToggle()}
+                disabled={busy}
+                className={`px-4 py-2 rounded font-mono text-xs font-bold uppercase tracking-widest ${
+                  backendConnected ? "bg-primary text-primary-foreground" : "bg-success text-white"
+                } hover:brightness-110 disabled:opacity-50`}
+              >
+                {busy ? "…" : backendConnected ? "■ Disconnect" : "▶ Connect"}
+              </button>
+            </>
+          ) : (
+            <>
+              <span
+                className={`text-[10px] font-mono uppercase ${running ? "text-success" : "text-muted"}`}
+              >
+                {running ? "● Pipeline Running" : "○ Idle"}
+              </span>
+              <button
+                onClick={() => (running ? stopMonitor() : startMonitor())}
+                className={`px-4 py-2 rounded font-mono text-xs font-bold uppercase tracking-widest ${
+                  running ? "bg-primary text-primary-foreground" : "bg-success text-white"
+                } hover:brightness-110`}
+              >
+                {running ? "■ Stop" : "▶ Start"}
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -665,7 +923,7 @@ function ConnectionPanel() {
                 <label className="text-[10px] font-mono uppercase text-muted">Port</label>
                 <button
                   onClick={refresh}
-                  disabled={running}
+                  disabled={connectionBusy}
                   className="text-[9px] font-mono uppercase text-muted hover:text-foreground disabled:opacity-50"
                 >
                   ↻ 재탐지
@@ -675,7 +933,7 @@ function ConnectionPanel() {
                 <select
                   value={port}
                   onChange={(e) => setPort(e.target.value)}
-                  disabled={running || ports.length === 0}
+                  disabled={connectionBusy || ports.length === 0}
                   className="w-full mt-1 bg-surface border border-border rounded px-3 py-2 text-xs font-mono disabled:opacity-50"
                 >
                   {ports.length === 0 && <option value="">감지된 포트 없음</option>}
@@ -690,7 +948,7 @@ function ConnectionPanel() {
                 <input
                   value={port}
                   onChange={(e) => setPort(e.target.value)}
-                  disabled={running}
+                  disabled={connectionBusy}
                   placeholder="/dev/cu.usbmodemXXXX"
                   className="w-full mt-1 bg-surface border border-border rounded px-3 py-2 text-xs font-mono disabled:opacity-50"
                 />
@@ -706,7 +964,7 @@ function ConnectionPanel() {
               <select
                 value={baud}
                 onChange={(e) => setSerialBaud(Number(e.target.value))}
-                disabled={running}
+                disabled={connectionBusy}
                 className="w-full mt-1 bg-surface border border-border rounded px-3 py-2 text-xs font-mono disabled:opacity-50"
               >
                 {[115200, 230400, 460800, 921600, 1500000].map((b) => (

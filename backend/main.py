@@ -19,7 +19,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import Body, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from csi.buffer import RingBuffer
@@ -28,6 +28,7 @@ from detector import FallDetector
 from notifier import DEFAULT_SERVER, NtfyNotifier
 from onboarding import CalibrationState, run_calibration
 from presence import PresenceConfig
+from presence_loop import PresenceLoop
 
 WS_PUSH_HZ = 10
 
@@ -36,6 +37,7 @@ reader: SerialReader | None = None
 detector: FallDetector | None = None
 detector_error: str | None = None
 notifier: NtfyNotifier | None = None
+presence_loop: PresenceLoop | None = None
 
 # 재실(움직임/Wander) 감지 설정과 온보딩 캘리브레이션 상태 — 낙상 DL 모델과 무관한
 # 별도 인메모리 상태(백엔드 재시작 시 초기화, 기존 PipelineConfig류와 동일한 설계).
@@ -47,10 +49,42 @@ calibration_task: asyncio.Task | None = None
 app = FastAPI(title="CSI-Guard Local Backend", version="0.1.0")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:8080", "http://127.0.0.1:8080"],
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def start_reader(port: str | None = None, baud: int = 921600, preferred_serial: str | None = None) -> None:
+    global reader
+    if reader is not None and reader.running and reader.port == port and reader.baud == baud:
+        return
+    old_reader = reader
+    reader = None
+    if old_reader is not None:
+        old_reader.stop()
+        old_reader.join(timeout=2.0)
+    reader = SerialReader(ring, port=port, baud=baud, preferred_serial=preferred_serial)
+    reader.start()
+
+
+def stop_reader() -> None:
+    global reader
+    if reader is None:
+        return
+    old_reader = reader
+    reader = None
+    old_reader.stop()
+    old_reader.join(timeout=2.0)
+
+
+def wait_for_reader_connected(timeout_s: float = 3.0) -> bool:
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        if reader is not None and reader.running:
+            return True
+        time.sleep(0.1)
+    return False
 
 
 @app.get("/")
@@ -85,6 +119,7 @@ def monitor_status() -> dict:
         "serial": reader.status() if reader else None,
         "buffer": ring.stats(),
         "detect": detector.status() if detector else {"enabled": False, "reason": detector_error},
+        "presence": presence_loop.status() if presence_loop else {"enabled": False},
         "notify": notifier.status() if notifier else {"enabled": False, "reason": "ntfy 토픽 미설정"},
         "server_time": time.time(),
     }
@@ -99,13 +134,34 @@ def notify_test() -> dict:
     return {"ok": True, "topic": notifier.topic}
 
 
+@app.post("/monitor/start")
+def monitor_start(payload: dict = Body({})) -> dict:
+    port = payload.get("port")
+    baud = payload.get("baud", 921600)
+    preferred_serial = payload.get("preferred_serial")
+    start_reader(port=port, baud=baud, preferred_serial=preferred_serial)
+    connected = wait_for_reader_connected(3.0)
+    return {"status": "started", "port": reader.port if reader else None, "connected": connected}
+
+
+@app.post("/monitor/stop")
+def monitor_stop() -> dict:
+    stop_reader()
+    return {"status": "stopped"}
+
+
 @app.post("/onboarding/calibrate/start")
-async def onboarding_calibrate_start() -> dict:
+async def onboarding_calibrate_start(payload: dict = Body({})) -> dict:
     """온보딩 3단계: 캘리브레이션을 백그라운드로 시작 (leaving/waiting_ack/waiting_agc/
     measuring 4단계, 총 약 31초 — 실제 소요시간 그대로, 압축하지 않음)."""
     global calibration_task
+    port = payload.get("port")
+    baud = payload.get("baud", 921600)
+    preferred_serial = payload.get("preferred_serial")
     if reader is None or not reader.running:
-        raise HTTPException(status_code=400, detail="device not connected")
+        start_reader(port=port, baud=baud, preferred_serial=preferred_serial)
+        if not wait_for_reader_connected(3.0):
+            raise HTTPException(status_code=400, detail="device not connected")
     if calibration_state.phase not in ("idle", "done", "error"):
         raise HTTPException(status_code=400, detail="calibration already in progress")
     calibration_task = asyncio.create_task(
@@ -176,6 +232,10 @@ async def ws_live(ws: WebSocket) -> None:
                 "amp_mean": round(float(amps.mean()), 3) if times.size else None,
                 "amp_std": round(float(amps.std()), 3) if times.size else None,
             }
+            # 재실/움직임(MV)은 DL 모델과 무관하게 항상 계산되므로 detector 유무와
+            # 상관없이 먼저 병합 — detector가 있으면 낙상 판정 필드가 덧붙는다.
+            if presence_loop is not None:
+                payload.update(presence_loop.live_payload())
             if detector is not None:
                 payload.update(detector.live_payload())
             await ws.send_text(json.dumps(payload))
@@ -198,17 +258,20 @@ def start_detector(args: argparse.Namespace) -> None:
         engine = FallInferenceEngine(checkpoint_path=args.checkpoint, device=args.device)
         engine.warmup()
         on_fall = notifier.notify_fall if notifier is not None else None
-        detector = FallDetector(
-            ring,
-            engine,
-            threshold=args.threshold,
-            presence_config=presence_config,
-            on_fall=on_fall,
-        )
+        detector = FallDetector(ring, engine, threshold=args.threshold, on_fall=on_fall)
         detector.start()
     except Exception as error:
         detector_error = f"{type(error).__name__}: {error}"
         logging.getLogger("detector").exception("모델 로드 실패, 추론 비활성")
+
+
+def start_presence_loop() -> None:
+    """움직임(MV)/재실 감지는 DL 모델(--no-model, 체크포인트 미존재 등)과 무관하게
+    시리얼 수신기가 붙어 있는 한 항상 동작해야 하므로 start_detector와 별개로,
+    조건 없이 기동한다."""
+    global presence_loop
+    presence_loop = PresenceLoop(ring, presence_config)
+    presence_loop.start()
 
 
 def start_notifier(args: argparse.Namespace) -> None:
@@ -247,17 +310,17 @@ def main() -> None:
     )
     args = ap.parse_args()
 
-    reader = SerialReader(
-        ring, port=args.port, baud=args.baud, preferred_serial=args.preferred_serial
-    )
-    reader.start()
+    start_reader(port=args.port, baud=args.baud, preferred_serial=args.preferred_serial)
     start_notifier(args)
+    start_presence_loop()
     start_detector(args)
     try:
         uvicorn.run(app, host=args.http_host, port=args.http_port, log_level="info")
     finally:
         if detector is not None:
             detector.stop()
+        if presence_loop is not None:
+            presence_loop.stop()
         if notifier is not None:
             notifier.stop()
         reader.stop()
