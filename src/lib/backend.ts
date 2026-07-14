@@ -330,13 +330,25 @@ export interface PresenceLoopStatus {
   wander_baseline?: number | null;
 }
 
+export interface NtfyRecipient {
+  id: string;
+  name: string | null;
+  enabled: boolean;
+  notify_fall_enabled: boolean;
+  server: string;
+  topic: string;
+  sent_count: number;
+  failed_count: number;
+  dropped_count: number;
+  last_sent_time: number | null;
+  last_error: string | null;
+}
+
 export interface NotifyStatus {
   enabled: boolean;
-  reason?: string;
-  topic?: string;
-  sent_count?: number;
-  failed_count?: number;
-  last_error?: string | null;
+  count: number;
+  reason?: string | null;
+  recipients: NtfyRecipient[];
 }
 
 export interface MonitorStatus {
@@ -451,4 +463,89 @@ export async function updateDetectionConfig(
     throw new Error(body.detail ?? `detection/config ${res.status}`);
   }
   return res.json();
+}
+
+// ---- 알림(Ntfy) 다중 수신자 관리 ----
+
+export async function fetchNtfyRecipients(): Promise<NtfyRecipient[]> {
+  const res = await fetch(`${BACKEND_URL}/notify/recipients`, { signal: AbortSignal.timeout(2000) });
+  if (!res.ok) throw new Error(`notify/recipients ${res.status}`);
+  const data = await res.json();
+  return data.recipients;
+}
+
+export async function addNtfyRecipient(payload: { name?: string; topic: string; server?: string; notify_fall_enabled?: boolean }): Promise<NtfyRecipient> {
+  const res = await fetch(`${BACKEND_URL}/notify/recipients`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(5000),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ detail: `notify/recipients ${res.status}` }));
+    throw new Error(body.detail ?? `notify/recipients ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function updateNtfyRecipient(id: string, payload: { notify_fall_enabled?: boolean }): Promise<NtfyRecipient> {
+  const res = await fetch(`${BACKEND_URL}/notify/recipients/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(5000),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ detail: `notify/recipients/${id} ${res.status}` }));
+    throw new Error(body.detail ?? `notify/recipients/${id} ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function removeNtfyRecipient(id: string): Promise<void> {
+  const res = await fetch(`${BACKEND_URL}/notify/recipients/${id}`, {
+    method: "DELETE",
+    signal: AbortSignal.timeout(5000),
+  });
+  if (!res.ok) throw new Error(`notify/recipients/${id} ${res.status}`);
+}
+
+export async function testNtfyRecipient(id: string): Promise<void> {
+  const res = await fetch(`${BACKEND_URL}/notify/recipients/${id}/test`, {
+    method: "POST",
+    signal: AbortSignal.timeout(5000),
+  });
+  if (!res.ok) throw new Error(`notify/recipients/${id}/test ${res.status}`);
+}
+
+export async function testAllNtfyRecipients(): Promise<void> {
+  const res = await fetch(`${BACKEND_URL}/notify/test`, {
+    method: "POST",
+    signal: AbortSignal.timeout(5000),
+  });
+  if (!res.ok) throw new Error(`notify/test ${res.status}`);
+}
+
+export function useNtfyRecipients(intervalMs = 1000): NtfyRecipient[] | null {
+  const [recipients, setRecipients] = useState<NtfyRecipient[] | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const r = await fetchNtfyRecipients();
+        if (!cancelled) setRecipients(r);
+      } catch {
+        // 폴링 실패 무시
+      }
+    };
+    poll();
+    const id = setInterval(poll, intervalMs);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [intervalMs]);
+
+  return recipients;
 }

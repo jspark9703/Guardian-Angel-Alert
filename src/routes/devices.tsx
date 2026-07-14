@@ -727,7 +727,7 @@ function DiagnosticsPanel() {
       <div className="text-[10px] font-mono text-muted">
         알림(ntfy):{" "}
         {notify.enabled
-          ? `활성 · topic=${notify.topic}`
+          ? `활성 · 수신자 ${notify.count}명`
           : `비활성${notify.reason ? ` · ${notify.reason}` : ""}`}
       </div>
     </div>

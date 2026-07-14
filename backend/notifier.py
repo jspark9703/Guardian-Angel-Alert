@@ -37,10 +37,22 @@ QUEUE_MAXSIZE = 32
 class NtfyNotifier(threading.Thread):
     """ntfy 토픽으로 알림을 비동기 발송하는 백그라운드 스레드."""
 
-    def __init__(self, topic: str, server: str = DEFAULT_SERVER) -> None:
-        super().__init__(daemon=True, name="ntfy-notifier")
+    def __init__(
+        self,
+        recipient_id: str,
+        topic: str,
+        server: str = DEFAULT_SERVER,
+        display_name: str | None = None,
+        notify_fall_enabled: bool = True,
+    ) -> None:
+        # threading.Thread.name은 프로퍼티라 재사용하면 스레드 이름을 덮어써
+        # 버리므로, 수신자 표시 이름은 별도 속성(display_name)에 둔다.
+        super().__init__(daemon=True, name=f"ntfy-notifier-{recipient_id}")
+        self.id = recipient_id
+        self.display_name = display_name
         self.topic = topic
         self.server = server.rstrip("/")
+        self.notify_fall_enabled = notify_fall_enabled
         self._queue: queue.Queue[dict[str, Any] | None] = queue.Queue(maxsize=QUEUE_MAXSIZE)
         self._stop = threading.Event()
         self._lock = threading.Lock()
@@ -54,6 +66,8 @@ class NtfyNotifier(threading.Thread):
 
     def notify_fall(self, fall_count: int, proba: float | None, at: float) -> None:
         """FALL 확정 시 호출. 큐에 넣기만 하고 즉시 반환한다."""
+        if not self.notify_fall_enabled:
+            return
         when = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(at))
         proba_text = f"{proba:.1%}" if proba is not None else "N/A"
         self._enqueue(
@@ -137,7 +151,10 @@ class NtfyNotifier(threading.Thread):
     def status(self) -> dict[str, Any]:
         with self._lock:
             return {
+                "id": self.id,
+                "name": self.display_name,
                 "enabled": True,
+                "notify_fall_enabled": self.notify_fall_enabled,
                 "server": self.server,
                 "topic": self.topic,
                 "sent_count": self._sent_count,
