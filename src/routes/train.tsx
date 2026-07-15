@@ -12,10 +12,13 @@ function TrainPage() {
       <Header title="개인화 모델 학습" />
       <div className="p-6 max-w-4xl">
         <div className="bg-surface border border-dashed border-border rounded-lg p-12 text-center">
-          <div className="font-mono text-[10px] uppercase tracking-widest text-muted mb-4">Coming Soon</div>
-          <h1 className="text-2xl font-semibold tracking-tight mb-3">DNN 모델 학습 기능</h1>
+          <div className="font-mono text-[10px] uppercase tracking-widest text-muted mb-4">
+            Coming Soon
+          </div>
+          <h1 className="text-2xl font-semibold tracking-tight mb-3">개인 맞춤 학습 기능</h1>
           <p className="text-sm text-muted max-w-md mx-auto leading-relaxed">
-            거주자별 CSI 패턴에 맞춘 개인화 DNN 모델 학습 기능은 추후 제공될 예정입니다. 현재 규칙 기반 상태머신이 활성화되어 있습니다.
+            사용자 개개인의 움직임 패턴에 맞춘 맞춤형 감지 학습 기능은 추후 제공될 예정입니다.
+            현재는 기본 설정값으로 감지가 이루어지고 있습니다.
           </p>
           <div className="mt-8 grid grid-cols-3 gap-3 max-w-lg mx-auto text-left">
             <Placeholder label="Data Collection" />

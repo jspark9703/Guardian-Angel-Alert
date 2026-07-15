@@ -46,7 +46,7 @@ function HistoryPage() {
         <div className="flex justify-between items-center">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight mb-1">Detection History</h1>
-            <p className="text-sm text-muted">총 {falls.length}건 · 행을 클릭하면 움직임 그래프 및 낙상 구간을 확인할 수 있습니다.</p>
+            <p className="text-sm text-muted">지금까지 총 {falls.length}건이 감지되었습니다 · 각 항목을 클릭하면 당시 움직임 그래프와 낙상 발생 구간을 확인할 수 있습니다.</p>
           </div>
           <div className="flex gap-2">
             <select value={filter} onChange={(e) => setFilter(e.target.value)} className="bg-surface border border-border rounded px-3 py-2 text-xs font-mono">

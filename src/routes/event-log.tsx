@@ -13,14 +13,16 @@ function EventLogPage() {
   const [filter, setFilter] = useState<string>("ALL");
   const [query, setQuery] = useState<string>("");
 
+  const todayLogs = useMemo(() => logs.filter((l) => isToday(l.ts)), [logs]);
+
   const filtered = useMemo(() => {
-    return logs.filter((l) => {
+    return todayLogs.filter((l) => {
       const matchLevel = filter === "ALL" || l.level === filter;
       const matchQuery =
         query.trim() === "" || l.msg.toLowerCase().includes(query.trim().toLowerCase());
       return matchLevel && matchQuery;
     });
-  }, [logs, filter, query]);
+  }, [todayLogs, filter, query]);
 
   return (
     <div>
@@ -30,7 +32,7 @@ function EventLogPage() {
           <div>
             <h1 className="text-2xl font-semibold tracking-tight mb-1">Event Log</h1>
             <p className="text-sm text-muted">
-              총 {logs.length}건 · 서비스 권한 범위 내 이벤트만 표시됩니다.
+              오늘 총 {todayLogs.length}건의 이벤트가 발생했습니다.
             </p>
           </div>
           <div className="flex gap-2">
@@ -78,7 +80,7 @@ function EventLogPage() {
               {filtered.length === 0 && (
                 <tr>
                   <td colSpan={3} className="p-8 text-center text-muted text-xs">
-                    조건에 맞는 이벤트 로그가 없습니다.
+                    오늘 조건에 맞는 이벤트가 없습니다.
                   </td>
                 </tr>
               )}
@@ -87,6 +89,16 @@ function EventLogPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+function isToday(ts: number) {
+  const d = new Date(ts);
+  const now = new Date();
+  return (
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate()
   );
 }
 

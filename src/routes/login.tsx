@@ -33,7 +33,7 @@ function LoginPage() {
     <div className="min-h-screen flex items-center justify-center bg-background p-6">
       <div className="w-full max-w-md">
         <div className="mb-8 text-center">
-          <div className="font-mono font-bold text-2xl tracking-tighter">CSI-GUARD v4.2</div>
+          <div className="font-mono font-bold text-2xl tracking-tighter">CSI-GUARD</div>
           <p className="text-xs font-mono text-muted uppercase tracking-widest mt-1">
             Fall Detection Console
           </p>

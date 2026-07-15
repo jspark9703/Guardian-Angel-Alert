@@ -166,9 +166,9 @@ function ConfigPage() {
                 <span className="font-mono text-foreground">
                   {user?.name} ({user?.role})
                 </span>{" "}
-                은 일반 사용자입니다. 알고리즘 파라미터를 변경하면 낙상 탐지 성능(오탐/미탐)에{" "}
-                <span className="text-primary font-semibold">직접적인 영향</span>이 발생할 수 있으니
-                반드시 서비스 관리자와 협의 후 수정하시기 바랍니다.
+                은 일반 사용자입니다. 이 설정을 변경하면 낙상을 잘못 알리거나 놓치는 등{" "}
+                <span className="text-primary font-semibold">감지 결과에 직접적인 영향</span>이
+                발생할 수 있으니 반드시 서비스 관리자와 협의 후 수정하시기 바랍니다.
               </p>
             </div>
           </div>
@@ -181,11 +181,11 @@ function ConfigPage() {
         )}
 
         <section className="bg-surface border border-border rounded-lg p-4">
-          <SectionTitle>Config Sync</SectionTitle>
-          <p className="text-xs text-muted font-mono">
+          <SectionTitle>설정 저장 안내</SectionTitle>
+          <p className="text-xs text-muted">
             {useReal
-              ? "GET/POST /presence/config · GET/POST /detection/config — 백엔드에 곧바로 반영, 인메모리 전용(재시작 시 초기화)"
-              : "이 화면의 값은 mock 시뮬레이션(PipelineConfig)에만 적용됩니다. HOME 실장치 연동 시에는 이 페이지가 실백엔드의 /presence/config · /detection/config를 직접 호출합니다."}
+              ? "이 화면에서 변경한 설정은 장치에 즉시 반영됩니다. 다만 시스템이 재시작되면 초기값으로 돌아갑니다."
+              : "이 화면의 값은 현재 테스트용 시뮬레이션에만 적용됩니다. 실제 장치가 연결되면 이 페이지에서 바로 그 장치의 설정을 조정하게 됩니다."}
           </p>
         </section>
       </div>
@@ -216,7 +216,7 @@ function MockConfigForm({ isServiceAdmin }: { isServiceAdmin: boolean }) {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight mb-1">Pipeline Configuration</h1>
           <p className="text-sm text-muted">
-            mock 시뮬레이션(PipelineConfig)에 적용됩니다 — 다음 tick부터 즉시 반영.
+            현재 테스트용 시뮬레이션에 적용되는 설정이며, 저장하면 곧바로 반영됩니다.
           </p>
         </div>
         <div className="flex gap-2">
@@ -237,7 +237,7 @@ function MockConfigForm({ isServiceAdmin }: { isServiceAdmin: boolean }) {
       </div>
 
       <section>
-        <SectionTitle>탐지 알고리즘 파라미터</SectionTitle>
+        <SectionTitle>탐지 설정값</SectionTitle>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {MOCK_FIELDS.map((f) => (
             <ParamRow
@@ -345,8 +345,8 @@ function RealConfigForm({ isServiceAdmin }: { isServiceAdmin: boolean }) {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight mb-1">Pipeline Configuration</h1>
           <p className="text-sm text-muted">
-            실백엔드(로컬 backend/main.py)에 곧바로 반영됩니다 — 재시작 없이, 단 인메모리
-            전용(재시작 시 초기화).
+            연결된 실제 장치에 재시작 없이 곧바로 반영됩니다. 다만 시스템을 재시작하면 초기값으로
+            돌아갑니다.
           </p>
         </div>
         <div className="flex gap-2">
@@ -368,13 +368,13 @@ function RealConfigForm({ isServiceAdmin }: { isServiceAdmin: boolean }) {
 
       {!detectionEnabled && (
         <div className="bg-warning/10 border border-warning/40 rounded p-3 text-xs text-warning">
-          낙상 탐지 모델이 비활성 상태입니다(--no-model 또는 로드 실패) — 낙상 신뢰도 임계값/재감지
-          lockout 대기시간은 지금 적용되지 않습니다.
+          낙상 탐지 기능이 현재 꺼져 있어, 낙상 감지 민감도와 재감지 대기시간 설정은 지금 적용되지
+          않습니다.
         </div>
       )}
 
       <section>
-        <SectionTitle>탐지 알고리즘 파라미터</SectionTitle>
+        <SectionTitle>탐지 설정값</SectionTitle>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {REAL_FIELDS.map((f) => (
             <ParamRow

@@ -60,8 +60,8 @@ function ResidentsPage() {
 
   const title = isFacility ? "입소자 · 디바이스 관리" : "가족 · 디바이스 관리";
   const subtitle = isFacility
-    ? "시설 거주자 프로필, 방 번호, ESP32 매핑(다중 가능), mv_threshold 오버라이드"
-    : "가정 내 사용자 프로필과 ESP32 매핑(다중 가능) · 본인 계정에만 귀속";
+    ? "입소자 정보와 방 번호를 등록하고, 담당 장치를 연결할 수 있습니다."
+    : "가족 구성원 정보를 등록하고, 사용할 장치를 연결할 수 있습니다.";
 
   return (
     <div>

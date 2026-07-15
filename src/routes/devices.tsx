@@ -89,7 +89,7 @@ function DevicesPage() {
 
   return (
     <div>
-      <Header title={isFacility ? "장치 설정 · ESP32 관리" : "장치 설정 · 가정 내 장치"} />
+      <Header title={isFacility ? "장치 설정 · 전체 장치 관리" : "장치 설정 · 가정 내 장치"} />
       <div className="p-6 space-y-4 max-w-7xl">
         <div className="flex justify-between items-center">
           <div>
@@ -98,8 +98,8 @@ function DevicesPage() {
             </h1>
             <p className="text-sm text-muted">
               {isFacility
-                ? "MQTT 연동 ESP32 장치 상태 · RSSI · AGC · Noise Floor 모니터링 및 재설정"
-                : "설치된 공간별 ESP32 장치 상태 및 재설정 · 거실 / 침실 / 화장실 등 위치별 관리"}
+                ? "등록된 모든 장치의 연결 상태를 확인하고, 필요할 때 재설정할 수 있습니다."
+                : "거실 · 침실 · 화장실 등 설치한 공간별 장치 상태를 확인하고 재설정할 수 있습니다."}
             </p>
           </div>
         </div>
@@ -826,8 +826,8 @@ function ConnectionPanel() {
           <SectionTitle>통신 설정 · Connection</SectionTitle>
           <p className="text-xs text-muted">
             {isRealHome
-              ? "포트/Baud를 선택한 뒤 연결 버튼으로 backend/main.py의 시리얼 연결을 직접 제어합니다. 연결 중에는 포트/Baud를 변경할 수 없습니다."
-              : "ESP32 수신기 시리얼 포트를 설정하고 파이프라인을 제어합니다. MQTT는 비활성화 상태입니다."}
+              ? "연결할 포트를 선택한 뒤 버튼을 눌러 장치와의 연결을 직접 제어합니다. 연결 중에는 포트를 변경할 수 없습니다."
+              : "수신기의 연결 포트를 설정하고 감지 기능을 켜고 끌 수 있습니다."}
           </p>
         </div>
         <div className="flex items-center gap-2">

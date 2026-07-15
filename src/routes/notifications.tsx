@@ -69,16 +69,16 @@ function NotificationsPage() {
           <h1 className="text-2xl font-semibold tracking-tight mb-1">Notification Gateway</h1>
           <p className="text-sm text-muted">
             {isFacility
-              ? "입소자별 알림 수신자 관리 · 낙상 감지 시 해당 입소자에 등록된 가족·요양사에게만 즉시 통보"
-              : "낙상 감지 시 SMS · Push · ARS 채널로 즉시 통보 · 미확인 시 자동 에스컬레이션"}
+              ? "입소자별 알림 수신자를 관리합니다 · 낙상이 감지되면 해당 입소자에 등록된 가족·요양사에게만 즉시 알립니다."
+              : "낙상이 감지되면 등록된 모든 수신자의 휴대폰으로 즉시 알림을 보냅니다."}
           </p>
         </div>
 
         {isFacility && (
           <section className="grid grid-cols-3 gap-4">
-            <ChannelCard title="SMS" desc="Twilio · KT Bizmessage" enabled />
-            <ChannelCard title="Web/App Push" desc="FCM · APNs" enabled />
-            <ChannelCard title="ARS Escalation" desc="60초 미확인 시 자동 음성 통화" enabled />
+            <ChannelCard title="SMS" desc="문자 메시지로 알림 발송" enabled />
+            <ChannelCard title="Web/App Push" desc="모바일 앱 푸시 알림" enabled />
+            <ChannelCard title="ARS Escalation" desc="60초 미확인 시 자동 음성 전화" enabled />
           </section>
         )}
 
@@ -450,8 +450,19 @@ function RealNtfySection() {
 
   return (
     <section>
+      <div className="bg-surface border border-border rounded-lg p-4 mb-4 space-y-2">
+        <div className="text-sm font-semibold">푸시 알림 받는 방법 (NTFY 앱)</div>
+        <ol className="text-xs text-muted space-y-1 list-decimal list-inside">
+          <li>휴대폰에 앱 스토어에서 "ntfy"를 검색해 NTFY 앱을 설치합니다.</li>
+          <li>아래 "+ 수신자 추가" 버튼을 눌러 새 수신자를 등록합니다.</li>
+          <li>
+            자동으로 생성된 구독 코드를 NTFY 앱에서 구독하면, 낙상 감지 시 바로 알림을 받을 수
+            있습니다.
+          </li>
+        </ol>
+      </div>
       <div className="flex justify-between items-center mb-3">
-        <SectionTitle>Push Notifications (ntfy.sh)</SectionTitle>
+        <SectionTitle>알림 수신자</SectionTitle>
         <div className="space-x-2">
           <button
             onClick={() =>
@@ -479,7 +490,7 @@ function RealNtfySection() {
         <table className="w-full text-left text-sm">
           <thead>
             <tr className="text-[10px] text-muted border-b border-border bg-background/30 font-mono">
-              <th className="p-3 font-medium uppercase">Name / Topic</th>
+              <th className="p-3 font-medium uppercase">이름 / 구독 코드</th>
               <th className="p-3 font-medium uppercase">Server</th>
               <th className="p-3 font-medium uppercase">Fall Alert</th>
               <th className="p-3 font-medium uppercase">Stats</th>
@@ -553,7 +564,7 @@ function RealNtfySection() {
             {recipients.length === 0 && (
               <tr>
                 <td colSpan={5} className="p-4 text-center text-muted text-xs">
-                  등록된 수신자가 없습니다. 앱을 설치하고 토픽을 구독한 뒤 추가하세요.
+                  등록된 수신자가 없습니다. NTFY 앱을 설치하고 구독 코드를 등록해 보세요.
                 </td>
               </tr>
             )}
@@ -564,10 +575,10 @@ function RealNtfySection() {
       {adding && (
         <div className="fixed inset-0 bg-black/70 z-40 flex items-center justify-center p-6">
           <div className="bg-surface border border-border rounded-lg max-w-sm w-full p-6 space-y-4">
-            <h3 className="text-sm font-semibold">ntfy 수신자 추가</h3>
+            <h3 className="text-sm font-semibold">알림 수신자 추가</h3>
             <p className="text-xs text-muted leading-relaxed">
-              ntfy 앱을 설치하고 고유한 토픽을 구독하세요. 아래에 동일한 토픽을 입력하면 낙상 발생
-              시 푸시 알림이 발송됩니다.
+              아래 구독 코드는 자동으로 생성되었습니다. 휴대폰의 NTFY 앱에서 이 코드를 그대로
+              구독하면, 낙상 발생 시 푸시 알림을 받을 수 있습니다.
             </p>
             <F label="이름 (선택)">
               <input
@@ -577,7 +588,7 @@ function RealNtfySection() {
                 className={cls}
               />
             </F>
-            <F label="토픽 (필수)">
+            <F label="구독 코드 (자동 생성)">
               <input
                 value={newTopic}
                 onChange={(e) => setNewTopic(e.target.value)}

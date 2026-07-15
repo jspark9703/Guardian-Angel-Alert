@@ -52,7 +52,7 @@ export function AppSidebar() {
           <div
             className={`size-3 rounded-full ${operational ? "bg-success animate-signal" : "bg-muted"}`}
           />
-          <h1 className="font-mono font-bold tracking-tighter text-lg">CSI-GUARD v4.2</h1>
+          <h1 className="font-mono font-bold tracking-tighter text-lg">CSI-GUARD</h1>
         </div>
         <p className="text-[10px] text-muted uppercase tracking-widest font-mono">
           {operational ? "System Operational" : "System Idle"}
