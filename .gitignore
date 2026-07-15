@@ -42,8 +42,20 @@ Window3BestModelInference/
 # research feature extraction package (raw CSI -> model input preprocessing)
 ACF_Scalogram_FeatureExtraction/
 
+# improved segmentation model + preprocessing package (weights + validation data)
+InhouseSegmentationRealtime/
+
 # python backend
 backend/.venv/
+backend/dumps/
+
+# 2x2 실험 도구와 데이터: 전용 레포로 분리됨
+# https://github.com/type-types/csi-guard-2x2-experiment
+backend/experiments/
+backend/experiment.py
+backend/experiment_report.py
+backend/experiment_server.py
+backend/inference/legacy.py
 __pycache__/
 *.pyc
 
