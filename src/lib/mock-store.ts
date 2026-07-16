@@ -1048,10 +1048,10 @@ function tick() {
 
   const updated = s.residents.map((r) => {
     if (!activeIds.includes(r.id)) return r;
-    const baseline = 0.3 + Math.random() * 0.5;
+    // 낙상은 난수로 주입하지 않는다. FALL은 백엔드 실판정(applyBackendDetection)
+    // 또는 수동 낙상 시뮬레이션 버튼(simulateFall)으로만 발생한다.
     const cooling = (fallCooldown[r.id] ?? 0) > now;
-    const spike = !cooling && Math.random() < 0.006;
-    const mv = spike ? 3.0 + Math.random() * 2.0 : baseline;
+    const mv = 0.3 + Math.random() * 0.5;
     const threshold = r.thresholdOverride ?? s.config.mv_threshold;
     let nextState: StateMachine = r.state;
     const confidence = Math.min(0.99, mv / (threshold * 1.5));
